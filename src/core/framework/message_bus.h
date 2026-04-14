@@ -11,9 +11,15 @@
 #include "logger/logger.h"
 
 #include "callback_executor.h"
+#include "thread_pool.h"
 
 namespace Framework {
 class MessageBus;
+
+enum class ExecutionPolicy {
+  kMainThread,
+  kBackground
+};
 }
 
 // 类型特征：提取函数/可调用对象的参数类型
@@ -107,6 +113,11 @@ class TypedCallback : public CallbackBase {
 class MessageBus {
  public:
   using CallbackId = size_t;
+
+  struct SubscriberEntry {
+    std::unique_ptr<CallbackBase> callback;
+    ExecutionPolicy policy;
+  };
   
   static MessageBus& Instance();
 
@@ -121,21 +132,21 @@ class MessageBus {
     if (it != subscribers_.end()) {
       const std::type_info& data_type = typeid(T);
       size_t subscriber_count = it->second.size();
-      // LOG_INFO("[MessageBus::Publish] topic: " << topic 
-      //           << ", type: " << data_type.name() 
-      //           << ", subscribers: " << subscriber_count);
       for (auto& pair : it->second) {
-        if (pair.second) {
-          // 保存数据的副本（因为可能在异步调用中使用）
-          auto callback_ptr = pair.second.get();
+        auto& entry = pair.second;
+        if (entry.callback) {
+          auto policy = entry.policy;
+          auto callback_ptr = entry.callback.get();
           auto data_copy = std::make_shared<T>(data);
-          // typeid(T) 返回的引用在整个程序生命周期内有效，可以直接使用
           const std::type_info* type_ptr = &typeid(T);
-          detail::ThreadSafeCallbackExecutor::Execute([callback_ptr, data_copy, type_ptr]() {
-            // TypedCallback 内部会进行类型匹配检查
-            // LOG_INFO("[MessageBus::Publish] Executing callback, type: " << type_ptr->name());
+          auto task = [callback_ptr, data_copy, type_ptr]() {
             callback_ptr->call(static_cast<const void*>(data_copy.get()), *type_ptr);
-          });
+          };
+          if (policy == ExecutionPolicy::kBackground) {
+            ThreadPool::Instance().Enqueue(task);
+          } else {
+            detail::ThreadSafeCallbackExecutor::Execute(task);
+          }
         }
       }
     } else {
@@ -146,14 +157,14 @@ class MessageBus {
   }
   
   template<typename T>
-  CallbackId Subscribe(const std::string& topic, std::function<void(const T&)> callback) {
+  CallbackId Subscribe(const std::string& topic, std::function<void(const T&)> callback, ExecutionPolicy policy = ExecutionPolicy::kMainThread) {
     std::lock_guard<std::mutex> lock(mutex_);
     CallbackId id = next_callback_id_.fetch_add(1);
-    // 直接存储类型 T 的回调，无需 std::any 转换
-    subscribers_[topic][id] = std::make_unique<TypedCallback<T>>(callback);
+    subscribers_[topic][id] = {std::make_unique<TypedCallback<T>>(callback), policy};
     LOG_INFO("[MessageBus::Subscribe] topic: " << topic 
               << ", type: " << typeid(T).name() 
-              << ", callback_id: " << id);
+              << ", callback_id: " << id
+              << ", policy: " << static_cast<int>(policy));
     return id;
   }
   
@@ -180,9 +191,8 @@ class MessageBus {
   MessageBus& operator=(const MessageBus&) = delete;
   
   mutable std::mutex mutex_;
-  std::map<std::string, std::map<CallbackId, std::unique_ptr<CallbackBase>>> subscribers_;
+  std::map<std::string, std::map<CallbackId, SubscriberEntry>> subscribers_;
   std::atomic<CallbackId> next_callback_id_{1};
 };
 
 }  // namespace Framework
-

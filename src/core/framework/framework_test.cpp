@@ -238,3 +238,26 @@ TEST_F(MessageBusTest, LargeData) {
   EXPECT_EQ(received_value[9999], 42);
 }
 
+TEST_F(MessageBusTest, BackgroundExecution) {
+  std::atomic<bool> executed(false);
+  std::thread::id main_thread_id = std::this_thread::get_id();
+  std::thread::id callback_thread_id;
+
+  GetMessageBusInstance()->Subscribe<int>("test_bg", [&](const int& value) {
+    callback_thread_id = std::this_thread::get_id();
+    executed = true;
+  }, Framework::ExecutionPolicy::kBackground);
+
+  PUBLISH("test_bg", 42);
+
+  // Wait for background execution
+  int retry = 0;
+  while (!executed && retry < 100) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    retry++;
+  }
+
+  EXPECT_TRUE(executed);
+  EXPECT_NE(main_thread_id, callback_thread_id);
+}
+
