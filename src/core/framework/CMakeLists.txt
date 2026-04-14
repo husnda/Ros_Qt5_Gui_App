@@ -1,9 +1,16 @@
 set(TARGET_NAME framework)
 include(GTestHelper)
 
-file(GLOB_RECURSE SOURCE_FILE CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR} *.cpp *.cc)
-list(FILTER SOURCE_FILE EXCLUDE REGEX ".*_test\\.cpp$|.*_test\\.cc$")
-file(GLOB_RECURSE INCLUDE_FILE CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR} *.h *.hpp)
+set(SOURCE_FILE
+    message_bus.cpp
+    thread_pool.cpp
+)
+set(INCLUDE_FILE
+    callback_executor.h
+    framework.h
+    message_bus.h
+    thread_pool.h
+)
 
 add_library(${TARGET_NAME} SHARED
     ${SOURCE_FILE}
