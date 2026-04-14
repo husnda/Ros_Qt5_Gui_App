@@ -23,7 +23,7 @@ DisplayOccMap::DisplayOccMap(const std::string &display_type,
     ParseOccupyMap();
     LOG_INFO("map update calling:" << map_image_.width() << " "
             << map_image_.height() << std::endl);
-  });
+  }, Framework::ExecutionPolicy::kBackground);
 }
 bool DisplayOccMap::SetDisplayConfig(const std::string &config_name,
                                      const std::any &config_data) {
@@ -44,7 +44,6 @@ void DisplayOccMap::paint(QPainter *painter,
   painter->drawImage(0, 0, map_image_);
 }
 void DisplayOccMap::ParseOccupyMap() {
-  QtConcurrent::run([this]() {
     // Eigen::matrix 坐标系与QImage坐标系不同,这里行列反着遍历
     //QImage坐标系
     // **************x
@@ -88,7 +87,6 @@ void DisplayOccMap::ParseOccupyMap() {
       CenterOnScene(mapToScene(x, y));
       init_flag_ = true;
     }
-  });
 }
 void DisplayOccMap::EraseMapRange(const QPointF &pose, double range) {
   float x = pose.x();

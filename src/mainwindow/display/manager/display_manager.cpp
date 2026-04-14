@@ -63,11 +63,11 @@ DisplayManager::DisplayManager() {
   
   SUBSCRIBE(MSG_ID_TOPOLOGY_MAP, [this](const TopologyMap& data) {
     scene_manager_ptr_->UpdateTopologyMap(data);
-  });
+  }, Framework::ExecutionPolicy::kBackground);
   
   SUBSCRIBE(MSG_ID_OCCUPANCY_MAP, [this](const OccupancyMap& data) {
     map_data_ = data;
-  });
+  }, Framework::ExecutionPolicy::kBackground);
 
   SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& data) {
     // LOG_INFO("robot pose update:" << data.x << " " << data.y << " " << data.theta);
@@ -82,7 +82,7 @@ DisplayManager::DisplayManager() {
       std::vector<Point> transformed_points = transLaserPoint(data.data);
       laser_display->UpdateLaserData(data.id, transformed_points);
     }
-  });
+  }, Framework::ExecutionPolicy::kBackground);
 }
 
 void DisplayManager::slotSetRobotPose(const RobotPose &pose) {
