@@ -37,7 +37,7 @@
 class rclcomm : public VirtualChannelNode {
  public:
   rclcomm();
-  ~rclcomm() override = default;
+  ~rclcomm() override;
 
  private:
   void recv_callback(const std_msgs::msg::Int32::SharedPtr msg);
@@ -95,7 +95,7 @@ class rclcomm : public VirtualChannelNode {
   std::shared_ptr<rclcpp::Node> node;
   basic::OccupancyMap occ_map_;
   basic::RobotPose m_currPose;
-  rclcpp::executors::MultiThreadedExecutor *m_executor;
+  std::unique_ptr<rclcpp::executors::MultiThreadedExecutor> m_executor;
   rclcpp::CallbackGroup::SharedPtr callback_group_laser;
   rclcpp::CallbackGroup::SharedPtr callback_group_other;
   std::atomic_bool init_flag_{false};

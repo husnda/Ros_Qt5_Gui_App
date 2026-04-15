@@ -38,9 +38,14 @@ rclcomm::rclcomm() {
   }
   Config::ConfigManager::Instance()->StoreConfig();
 }
+rclcomm::~rclcomm() {
+  Stop();
+}
 bool rclcomm::Start() {
-  rclcpp::init(0, nullptr);
-  m_executor = new rclcpp::executors::MultiThreadedExecutor;
+  if (!rclcpp::ok()) {
+    rclcpp::init(0, nullptr);
+  }
+  m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
 
   node = rclcpp::Node::make_shared("ros_qt5_gui_app");
   m_executor->add_node(node);
@@ -197,7 +202,36 @@ bool rclcomm::Start() {
 }
 
 bool rclcomm::Stop() {
-  rclcpp::shutdown();
+  if (rclcpp::ok()) {
+    // 1. Stop processing
+    init_flag_ = false;
+    
+    // 2. Clear all subscriptions
+    map_subscriber_.reset();
+    local_cost_map_subscriber_.reset();
+    global_cost_map_subscriber_.reset();
+    laser_scan_subscriber_.reset();
+    battery_state_subscriber_.reset();
+    odometry_subscriber_.reset();
+    local_path_subscriber_.reset();
+    global_path_subscriber_.reset();
+    robot_footprint_subscriber_.reset();
+    topology_map_subscriber_.reset();
+    image_subscriber_list_.clear();
+    
+    // 3. Clear TF resources
+    transform_listener_.reset();
+    tf_buffer_.reset();
+    
+    // 4. Clear publishers
+    speed_publisher_.reset();
+    reloc_pose_publisher_.reset();
+    nav_goal_publisher_.reset();
+    topology_map_update_publisher_.reset();
+    
+    // 5. Shutdown ROS2
+    rclcpp::shutdown();
+  }
   return true;
 }
 
