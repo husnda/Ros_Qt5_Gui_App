@@ -130,8 +130,6 @@ class MessageBus {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = subscribers_.find(topic);
     if (it != subscribers_.end()) {
-      const std::type_info& data_type = typeid(T);
-      size_t subscriber_count = it->second.size();
       for (auto& pair : it->second) {
         auto& entry = pair.second;
         if (entry.callback) {
