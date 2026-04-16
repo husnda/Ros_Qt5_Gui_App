@@ -29,3 +29,8 @@ cmake-build*
 *.vbproj.vssver.scc
 *.vbproj.vssver.scc.filters
 
+# Runtime logs and configs
+*.log
+config.json
+state.ini
+architecture.md
