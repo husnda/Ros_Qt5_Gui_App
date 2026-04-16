@@ -250,11 +250,12 @@ void rclcomm::getRobotPose() {
 basic::RobotPose rclcomm::getTransform(std::string from, std::string to) {
   basic::RobotPose ret;
   try {
-    if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100))) {
+    // 增加等待时间到 500ms，以应对 ROS2 发现阶段的延迟
+    if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500))) {
       return ret;
     }
     geometry_msgs::msg::TransformStamped transform =
-        tf_buffer_->lookupTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100));
+        tf_buffer_->lookupTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500));
     geometry_msgs::msg::Quaternion msg_quat = transform.transform.rotation;
     // 转换类型
     tf2::Quaternion q;

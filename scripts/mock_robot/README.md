@@ -46,6 +46,7 @@ source setup_env.sh
 cd build
 ./ros_qt5_gui_app
 ```
+*注意：启动后可能需要 5-10 秒进行 ROS2 节点发现，如果未立即看到地图，请耐心等待，无需频繁重启。*
 
 ---
 
