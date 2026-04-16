@@ -13,14 +13,15 @@ else
     echo "Warning: ROS2 Humble setup.bash not found at /opt/ros/humble/setup.bash"
 fi
 
-# 2. Add local library path (build/lib) to LD_LIBRARY_PATH
-# This ensures custom messages and plugins are found at runtime
+# 2. Add local and system library paths to LD_LIBRARY_PATH
+# This ensures custom messages, plugins, and ROS2 dependencies are found at runtime
 LOCAL_LIB_PATH="$PROJECT_ROOT/build/lib"
-if [ -d "$LOCAL_LIB_PATH" ]; then
-    export LD_LIBRARY_PATH="$LOCAL_LIB_PATH:$LD_LIBRARY_PATH"
-    echo "Added $LOCAL_LIB_PATH to LD_LIBRARY_PATH."
-else
-    echo "Note: Local lib directory $LOCAL_LIB_PATH not found. Run build first."
-fi
+ROS_LIB_PATH="/opt/ros/humble/lib"
+
+export LD_LIBRARY_PATH="$LOCAL_LIB_PATH:$ROS_LIB_PATH:$LD_LIBRARY_PATH"
+echo "Updated LD_LIBRARY_PATH to include local and ROS2 libraries."
+
+# 3. Export ROS environment variables for consistency
+export AMENT_PREFIX_PATH="/opt/ros/humble:$AMENT_PREFIX_PATH"
 
 echo "Environment setup complete."

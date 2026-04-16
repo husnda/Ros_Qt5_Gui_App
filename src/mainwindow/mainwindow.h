@@ -77,11 +77,13 @@ class MainWindow : public QMainWindow {
   QProgressBar *battery_bar_;
   QLabel *label_power_;
   ads::CDockAreaWidget *center_docker_area_;
-  std::map<std::string, RatioLayoutedFrame *> image_frame_map_;
+  std::map<std::string, QPointer<RatioLayoutedFrame>> image_frame_map_;
+  std::map<std::string, QPointer<ads::CDockWidget>> image_dock_map_;
   std::string map_path_{"./map"};
   
  signals:
   void OnRecvChannelData(const MsgId &id, const std::any &data);
+  void signalRecvImage(const std::string &location, std::shared_ptr<cv::Mat> data);
   
  private:
   void setupUi();

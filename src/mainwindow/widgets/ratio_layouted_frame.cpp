@@ -34,11 +34,12 @@
 
 #include <assert.h>
 #include <QMouseEvent>
+#include <QPainter>
 
 
 
 RatioLayoutedFrame::RatioLayoutedFrame(QWidget* parent, Qt::WindowFlags flags)
-    : QFrame(), outer_layout_(NULL), aspect_ratio_(4, 3), smoothImage_(false) {
+    : QFrame(parent, flags), outer_layout_(NULL), aspect_ratio_(4, 3), smoothImage_(false) {
   connect(this, SIGNAL(delayed_update()), this, SLOT(update()), Qt::QueuedConnection);
 }
 
@@ -67,38 +68,58 @@ void RatioLayoutedFrame::setImage(const QImage& image)  //, QMutex* image_mutex)
 }
 
 void RatioLayoutedFrame::resizeToFitAspectRatio() {
+  if (in_resize_) return;
+  in_resize_ = true;
+  
   QRect rect = contentsRect();
+  if (rect.isEmpty()) {
+    in_resize_ = false;
+    return;
+  }
 
   // reduce longer edge to aspect ration
-  double width;
-  double height;
+  double target_w;
+  double target_h;
 
   if (outer_layout_) {
-    width = outer_layout_->contentsRect().width();
-    height = outer_layout_->contentsRect().height();
+    target_w = outer_layout_->contentsRect().width();
+    target_h = outer_layout_->contentsRect().height();
   } else {
-    // if outer layout isn't available, this will use the old
-    // width and height, but this can shrink the display image if the
-    // aspect ratio changes.
-    width = rect.width();
-    height = rect.height();
+    target_w = rect.width();
+    target_h = rect.height();
   }
 
-  double layout_ar = width / height;
-  const double image_ar = double(aspect_ratio_.width()) / double(aspect_ratio_.height());
-  if (layout_ar > image_ar) {
-    // too large width
-    width = height * image_ar;
-  } else {
-    // too large height
-    height = width / image_ar;
+  if (target_w <= 0 || target_h <= 0) {
+    in_resize_ = false;
+    return;
   }
-  rect.setWidth(int(width + 0.5));
-  rect.setHeight(int(height + 0.5));
+
+  double layout_ar = target_w / target_h;
+  const double image_ar = double(aspect_ratio_.width()) / double(aspect_ratio_.height());
+  if (image_ar <= 0) {
+    in_resize_ = false;
+    return;
+  }
+
+  if (layout_ar > image_ar) {
+    target_w = target_h * image_ar;
+  } else {
+    target_h = target_w / image_ar;
+  }
+  
+  int final_w = int(target_w + 0.5);
+  int final_h = int(target_h + 0.5);
 
   // resize taking the border line into account
   int border = lineWidth();
-  resize(rect.width() + 2 * border, rect.height() + 2 * border);
+  int current_w = this->width();
+  int current_h = this->height();
+  
+  if (abs(current_w - (final_w + 2 * border)) > 1 || abs(current_h - (final_h + 2 * border)) > 1) {
+    resize(final_w + 2 * border, final_h + 2 * border);
+  }
+  
+  in_resize_ = false;
 }
 
 void RatioLayoutedFrame::setOuterLayout(QHBoxLayout* outer_layout) {
@@ -137,8 +158,7 @@ void RatioLayoutedFrame::setAspectRatio(unsigned short width, unsigned short hei
 void RatioLayoutedFrame::paintEvent(QPaintEvent* event) {
   QPainter painter(this);
   qimage_mutex_.lock();
-  if (!qimage_.isNull()) {
-    resizeToFitAspectRatio();
+  if (!qimage_.isNull() && !contentsRect().isEmpty()) {
     // TODO: check if full draw is really necessary
     //QPaintEvent* paint_event = dynamic_cast<QPaintEvent*>(event);
     //painter.drawImage(paint_event->rect(), qimage_);
@@ -150,7 +170,9 @@ void RatioLayoutedFrame::paintEvent(QPaintEvent* event) {
       } else {
         QImage image = qimage_.scaled(contentsRect().width(), contentsRect().height(),
                                       Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        painter.drawImage(contentsRect(), image);
+        if (!image.isNull()) {
+            painter.drawImage(contentsRect(), image);
+        }
       }
     }
   } else {
@@ -162,6 +184,11 @@ void RatioLayoutedFrame::paintEvent(QPaintEvent* event) {
     painter.drawRect(0, 0, frameRect().width() + 1, frameRect().height() + 1);
   }
   qimage_mutex_.unlock();
+}
+
+void RatioLayoutedFrame::resizeEvent(QResizeEvent* event) {
+  QFrame::resizeEvent(event);
+  resizeToFitAspectRatio();
 }
 
 int RatioLayoutedFrame::greatestCommonDivisor(int a, int b) {
@@ -181,4 +208,3 @@ void RatioLayoutedFrame::mousePressEvent(QMouseEvent* mouseEvent) {
 void RatioLayoutedFrame::onSmoothImageChanged(bool checked) {
   smoothImage_ = checked;
 }
-

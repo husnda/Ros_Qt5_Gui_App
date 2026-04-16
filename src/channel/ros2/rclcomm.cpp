@@ -42,195 +42,188 @@ rclcomm::~rclcomm() {
   Stop();
 }
 bool rclcomm::Start() {
-  if (!rclcpp::ok()) {
-    rclcpp::init(0, nullptr);
-  }
-  m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
-
-  node = rclcpp::Node::make_shared("ros_qt5_gui_app");
-  m_executor->add_node(node);
-  callback_group_laser =
-      node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-  callback_group_other =
-      node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
-
-  auto sub1_obt = rclcpp::SubscriptionOptions();
-  sub1_obt.callback_group = callback_group_other;
-  auto sub_laser_obt = rclcpp::SubscriptionOptions();
-  sub_laser_obt.callback_group = callback_group_laser;
-
-  nav_goal_publisher_ = node->create_publisher<geometry_msgs::msg::PoseStamped>(
-      GET_TOPIC_NAME(DISPLAY_GOAL), 10);
-  reloc_pose_publisher_ =
-      node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-          GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
-  speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
-      GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
-  map_subscriber_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-      GET_TOPIC_NAME(DISPLAY_MAP),
-      rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-      std::bind(&rclcomm::map_callback, this, std::placeholders::_1), sub1_obt);
-  local_cost_map_subscriber_ =
-      node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-          GET_TOPIC_NAME(DISPLAY_LOCAL_COST_MAP),
-          rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-          std::bind(&rclcomm::localCostMapCallback, this,
-                    std::placeholders::_1),
-          sub1_obt);
-  global_cost_map_subscriber_ =
-      node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-          GET_TOPIC_NAME(DISPLAY_GLOBAL_COST_MAP),
-          rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-          std::bind(&rclcomm::globalCostMapCallback, this,
-                    std::placeholders::_1),
-          sub1_obt);
-
-  laser_scan_subscriber_ =
-      node->create_subscription<sensor_msgs::msg::LaserScan>(
-          GET_TOPIC_NAME(DISPLAY_LASER), 20,
-          std::bind(&rclcomm::laser_callback, this, std::placeholders::_1),
-          sub_laser_obt);
-  battery_state_subscriber_ =
-      node->create_subscription<sensor_msgs::msg::BatteryState>(
-          GET_TOPIC_NAME(MSG_ID_BATTERY_STATE), 1,
-          std::bind(&rclcomm::BatteryCallback, this, std::placeholders::_1),
-          sub1_obt);
-  global_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
-      GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), 20,
-      std::bind(&rclcomm::path_callback, this, std::placeholders::_1),
-      sub1_obt);
-  local_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
-      GET_TOPIC_NAME(DISPLAY_LOCAL_PATH), 20,
-      std::bind(&rclcomm::local_path_callback, this, std::placeholders::_1),
-      sub1_obt);
-  odometry_subscriber_ = node->create_subscription<nav_msgs::msg::Odometry>(
-      GET_TOPIC_NAME(DISPLAY_ROBOT), 20,
-      std::bind(&rclcomm::odom_callback, this, std::placeholders::_1),
-      sub1_obt);
-  robot_footprint_subscriber_ = node->create_subscription<geometry_msgs::msg::PolygonStamped>(
-      GET_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT), 20,
-      std::bind(&rclcomm::robotFootprintCallback, this, std::placeholders::_1),
-      sub1_obt);
-  topology_map_subscriber_ = node->create_subscription<topology_msgs::msg::TopologyMap>(
-      GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP), 
-      rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-      std::bind(&rclcomm::topologyMapCallback, this, std::placeholders::_1),
-      sub1_obt);
-  topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
-      GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), 
-      rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
-  for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
-    LOG_INFO("image location:" << one_image_display.location << "topic:" << one_image_display.topic);
-    image_subscriber_list_.emplace_back(
-        node->create_subscription<sensor_msgs::msg::Image>(
-            one_image_display.topic, 1, [this, one_image_display](const sensor_msgs::msg::Image::SharedPtr msg) {
-              cv::Mat conversion_mat_;
-              try {
-                // 深拷贝转换为opencv类型
-                cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(
-                    msg, sensor_msgs::image_encodings::RGB8);
-                conversion_mat_ = cv_ptr->image;
-              } catch (cv_bridge::Exception &e) {
-                try {
-                  cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg);
-                  if (msg->encoding == "CV_8UC3") {
-                    // assuming it is rgb
-                    conversion_mat_ = cv_ptr->image;
-                  } else if (msg->encoding == "8UC1") {
-                    // convert gray to rgb
-                    cv::cvtColor(cv_ptr->image, conversion_mat_, CV_GRAY2RGB);
-                  } else if (msg->encoding == "16UC1" ||
-                             msg->encoding == "32FC1") {
-                    double min = 0;
-                    double max = 10;
-                    if (msg->encoding == "16UC1") max *= 1000;
-                    // if (ui_.dynamic_range_check_box->isChecked()) {
-                    //   // dynamically adjust range based on min/max in image
-                    //   cv::minMaxLoc(cv_ptr->image, &min, &max);
-                    //   if (min == max) {
-                    //     // completely homogeneous images are displayed in gray
-                    //     min = 0;
-                    //     max = 2;
-                    //   }
-                    // }
-                    cv::Mat img_scaled_8u;
-                    cv::Mat(cv_ptr->image - min).convertTo(img_scaled_8u, CV_8UC1, 255. / (max - min));
-                    cv::cvtColor(img_scaled_8u, conversion_mat_, CV_GRAY2RGB);
-                  } else {
-                    LOG_ERROR("image from " << msg->encoding
-                                            << " to 'rgb8' an exception was thrown (%s)"
-                                            << e.what());
-                    return;
-                  }
-                } catch (cv_bridge::Exception &e) {
-                  LOG_ERROR(
-                      "image from "
-                      << msg->encoding
-                      << " to 'rgb8' an exception was thrown (%s)" << e.what());
-
-                  return;
-                }
-              }
-              PUBLISH(MSG_ID_IMAGE, (std::pair<std::string, cv::Mat>(one_image_display.location, conversion_mat_)));
-            }));
-  }
-
-  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node->get_clock(), std::chrono::seconds(10));
-  transform_listener_ =
-      std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  std::lock_guard<std::mutex> lock(executor_mutex_);
   
+  if (!rclcpp::ok()) {
+    try {
+      rclcpp::init(0, nullptr);
+    } catch (const std::exception& e) {
+      LOG_ERROR("rclcpp::init failed: " << e.what());
+      return false;
+    }
+  }
+  
+  try {
+    m_executor = std::make_unique<rclcpp::executors::MultiThreadedExecutor>();
+
+    // 使用唯一节点名防止冲突
+    std::string node_name = "ros_qt5_gui_app_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    node = rclcpp::Node::make_shared(node_name);
+    m_executor->add_node(node);
+    
+    callback_group_laser =
+        node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+    callback_group_other =
+        node->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+    auto sub1_obt = rclcpp::SubscriptionOptions();
+    sub1_obt.callback_group = callback_group_other;
+    auto sub_laser_obt = rclcpp::SubscriptionOptions();
+    sub_laser_obt.callback_group = callback_group_laser;
+
+    nav_goal_publisher_ = node->create_publisher<geometry_msgs::msg::PoseStamped>(
+        GET_TOPIC_NAME(DISPLAY_GOAL), 10);
+    reloc_pose_publisher_ =
+        node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
+    speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
+        GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
+
+    // 核心话题订阅
+    auto create_safe_sub = [&](const std::string& name, auto& sub, auto func, const rclcpp::QoS& qos, const rclcpp::SubscriptionOptions& obt) {
+        try {
+            sub = node->create_subscription<typename std::remove_reference_t<decltype(sub)>::element_type::MessageT>(
+                GET_TOPIC_NAME(name), qos, std::bind(func, this, std::placeholders::_1), obt);
+            LOG_INFO("Successfully subscribed to " << name);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to subscribe to " << name << ": " << e.what());
+        }
+    };
+
+    create_safe_sub(DISPLAY_MAP, map_subscriber_, &rclcomm::map_callback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_LOCAL_COST_MAP, local_cost_map_subscriber_, &rclcomm::localCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_GLOBAL_COST_MAP, global_cost_map_subscriber_, &rclcomm::globalCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_LASER, laser_scan_subscriber_, &rclcomm::laser_callback, rclcpp::QoS(20), sub_laser_obt);
+    create_safe_sub(MSG_ID_BATTERY_STATE, battery_state_subscriber_, &rclcomm::BatteryCallback, rclcpp::QoS(1), sub1_obt);
+    create_safe_sub(DISPLAY_GLOBAL_PATH, global_path_subscriber_, &rclcomm::path_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_LOCAL_PATH, local_path_subscriber_, &rclcomm::local_path_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_ROBOT, odometry_subscriber_, &rclcomm::odom_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_ROBOT_FOOTPRINT, robot_footprint_subscriber_, &rclcomm::robotFootprintCallback, rclcpp::QoS(20), sub1_obt);
+    
+    try {
+        topology_map_subscriber_ = node->create_subscription<topology_msgs::msg::TopologyMap>(
+            GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP), 
+            rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+            std::bind(&rclcomm::topologyMapCallback, this, std::placeholders::_1),
+            sub1_obt);
+        LOG_INFO("Successfully subscribed to topology map");
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to subscribe to topology map: " << e.what());
+    }
+
+    try {
+        topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
+            GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), 
+            rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to create topology map publisher: " << e.what());
+    }
+        
+    for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
+      if (one_image_display.topic.empty()) continue;
+      LOG_INFO("image location:" << one_image_display.location << "topic:" << one_image_display.topic);
+      try {
+        image_subscriber_list_.emplace_back(
+            node->create_subscription<sensor_msgs::msg::Image>(
+                one_image_display.topic, 1, [this, one_image_display](const sensor_msgs::msg::Image::SharedPtr msg) {
+                    if (!msg) return;
+                    cv::Mat conversion_mat_;
+                    try {
+                    // 必须使用 toCvCopy 进行深拷贝，防止原始消息被销毁导致内存越界
+                    cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(
+                        msg, sensor_msgs::image_encodings::RGB8);
+                    if (cv_ptr) {
+                        conversion_mat_ = cv_ptr->image;
+                    }
+                    } catch (cv_bridge::Exception &e) {
+                    try {
+                        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg);
+                        if (cv_ptr) {
+                            if (msg->encoding == "CV_8UC3") {
+                            conversion_mat_ = cv_ptr->image;
+                            } else if (msg->encoding == "8UC1") {
+                            cv::cvtColor(cv_ptr->image, conversion_mat_, CV_GRAY2RGB);
+                            } else if (msg->encoding == "16UC1" || msg->encoding == "32FC1") {
+                            double min = 0;
+                            double max = 10;
+                            if (msg->encoding == "16UC1") max *= 1000;
+                            cv::Mat img_scaled_8u;
+                            cv::Mat(cv_ptr->image - min).convertTo(img_scaled_8u, CV_8UC1, 255. / (max - min));
+                            cv::cvtColor(img_scaled_8u, conversion_mat_, CV_GRAY2RGB);
+                            }
+                        }
+                    } catch (...) { return; }
+                    }
+                    if (!conversion_mat_.empty()) {
+                        auto image_payload = std::make_pair(one_image_display.location, std::make_shared<cv::Mat>(conversion_mat_));
+                        PUBLISH(MSG_ID_IMAGE, image_payload);
+                    }
+                }));
+      } catch (const std::exception& e) {
+        LOG_ERROR("Failed to create image subscription for " << one_image_display.topic << ": " << e.what());
+      }
+    }
+
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node->get_clock(), std::chrono::seconds(10));
+    transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    
+  } catch (const std::exception& e) {
+    LOG_ERROR("ROS2 Node/Sub initialization failed: " << e.what());
+    return false;
+  }
+
   SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
-    std::cout << "recv nav goal pose:" << pose << std::endl;
     PubNavGoal(pose);
   });
   SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
-    std::cout << "recv reloc pose:" << pose << std::endl;
     PubRelocPose(pose);
   });
   SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
-    std::cout << "recv robot speed:" << speed << std::endl;
     PubRobotSpeed(speed);
   });
   SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
-    std::cout << "recv topology map update:" << topology_map.map_name << std::endl;
     topology_msgs::msg::TopologyMap ros_msg = ConvertToRosMsg(topology_map);
     topology_map_update_publisher_->publish(ros_msg);
   });
-  
+
   init_flag_ = true;
   return true;
 }
 
 bool rclcomm::Stop() {
-  if (rclcpp::ok()) {
-    // 1. Stop processing
+  std::lock_guard<std::mutex> lock(executor_mutex_);
+  if (init_flag_) {
     init_flag_ = false;
     
-    // 2. Clear all subscriptions
     map_subscriber_.reset();
     local_cost_map_subscriber_.reset();
     global_cost_map_subscriber_.reset();
     laser_scan_subscriber_.reset();
     battery_state_subscriber_.reset();
-    odometry_subscriber_.reset();
-    local_path_subscriber_.reset();
     global_path_subscriber_.reset();
+    local_path_subscriber_.reset();
+    odometry_subscriber_.reset();
     robot_footprint_subscriber_.reset();
     topology_map_subscriber_.reset();
     image_subscriber_list_.clear();
     
-    // 3. Clear TF resources
+    nav_goal_publisher_.reset();
+    reloc_pose_publisher_.reset();
+    speed_publisher_.reset();
+    topology_map_update_publisher_.reset();
+    
     transform_listener_.reset();
     tf_buffer_.reset();
     
-    // 4. Clear publishers
-    speed_publisher_.reset();
-    reloc_pose_publisher_.reset();
-    nav_goal_publisher_.reset();
-    topology_map_update_publisher_.reset();
+    if (m_executor && node) {
+        m_executor->remove_node(node);
+    }
+    node.reset();
+    m_executor.reset();
     
-    // 5. Shutdown ROS2
-    rclcpp::shutdown();
+    if (rclcpp::ok()) {
+        rclcpp::shutdown();
+    }
   }
   return true;
 }
@@ -257,7 +250,7 @@ void rclcomm::getRobotPose() {
 basic::RobotPose rclcomm::getTransform(std::string from, std::string to) {
   basic::RobotPose ret;
   try {
-    if (!tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100))) {
+    if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100))) {
       return ret;
     }
     geometry_msgs::msg::TransformStamped transform =
@@ -303,7 +296,7 @@ void rclcomm::odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
 }
 void rclcomm::local_path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
   try {
-    if (!tf_buffer_->canTransform("map", msg->header.frame_id, tf2::TimePointZero, std::chrono::milliseconds(100))) {
+    if (!tf_buffer_ || !tf_buffer_->canTransform("map", msg->header.frame_id, tf2::TimePointZero, std::chrono::milliseconds(100))) {
       return;
     }
     geometry_msgs::msg::PointStamped point_map_frame;
@@ -329,16 +322,16 @@ void rclcomm::local_path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
 
 /// @brief loop for rate
 void rclcomm::Process() {
-  if (rclcpp::ok()) {
+  std::lock_guard<std::mutex> lock(executor_mutex_);
+  if (init_flag_ && rclcpp::ok() && m_executor) {
     m_executor->spin_some();
     getRobotPose();
   }
-  // std::cout << "loop" << std::endl;
 }
 
 void rclcomm::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
   try {
-    if (!tf_buffer_->canTransform("map", msg->header.frame_id, tf2::TimePointZero, std::chrono::milliseconds(100))) {
+    if (!tf_buffer_ || !tf_buffer_->canTransform("map", msg->header.frame_id, tf2::TimePointZero, std::chrono::milliseconds(100))) {
       return;
     }
     geometry_msgs::msg::PointStamped point_map_frame;
@@ -363,22 +356,17 @@ void rclcomm::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
 }
 
 void rclcomm::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
-  // qDebug()<<"订阅到激光话题";
-  // std::cout<<"recv laser"<<std::endl;
   double angle_min = msg->angle_min;
-  double angle_max = msg->angle_max;
   double angle_increment = msg->angle_increment;
   try {
-    //        geometry_msgs::msg::TransformStamped laser_transform =
-    //        tf_buffer_->lookupTransform("map","base_scan",tf2::TimePointZero);
+    if (!tf_buffer_) return;
     geometry_msgs::msg::PointStamped point_base_frame;
     geometry_msgs::msg::PointStamped point_laser_frame;
     basic::LaserScan laser_points;
     for (int i = 0; i < msg->ranges.size(); i++) {
-      // 计算当前偏移角度
       double angle = angle_min + i * angle_increment;
       double dist = msg->ranges[i];
-      if (isinf(dist))
+      if (std::isinf(dist))
         continue;
       double x = dist * cos(angle);
       double y = dist * sin(angle);
@@ -394,262 +382,136 @@ void rclcomm::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     }
     laser_points.id = 0;
     PUBLISH(MSG_ID_LASER_SCAN, laser_points);
-  } catch (tf2::TransformException &ex) {
-    // tf_buffer_->lookupTransform("map", "base_scan", tf2::TimePointZero);
-  }
+  } catch (tf2::TransformException &ex) {}
 }
-
-void rclcomm::globalCostMapCallback(
-    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-  int width = msg->info.width;
-  int height = msg->info.height;
-  double origin_x = msg->info.origin.position.x;
-  double origin_y = msg->info.origin.position.y;
-  basic::OccupancyMap cost_map(height, width,
-                               Eigen::Vector3d(origin_x, origin_y, 0),
-                               msg->info.resolution);
+void rclcomm::robotFootprintCallback(const geometry_msgs::msg::PolygonStamped::SharedPtr msg) {
+  basic::RobotPath footprint;
+  for (auto point : msg->polygon.points) {
+    basic::Point p;
+    p.x = point.x;
+    p.y = point.y;
+    footprint.push_back(p);
+  }
+  PUBLISH(MSG_ID_ROBOT_FOOTPRINT, footprint);
+}
+void rclcomm::topologyMapCallback(const topology_msgs::msg::TopologyMap::SharedPtr msg) {
+  PUBLISH(MSG_ID_TOPOLOGY_MAP, ConvertFromRosMsg(msg));
+}
+void rclcomm::PubRelocPose(const basic::RobotPose &pose) {
+  geometry_msgs::msg::PoseWithCovarianceStamped msg;
+  msg.header.frame_id = "map";
+  msg.header.stamp = node->get_clock()->now();
+  msg.pose.pose.position.x = pose.x;
+  msg.pose.pose.position.y = pose.y;
+  tf2::Quaternion q;
+  q.setRPY(0, 0, pose.theta);
+  msg.pose.pose.orientation = tf2::toMsg(q);
+  reloc_pose_publisher_->publish(msg);
+}
+void rclcomm::PubNavGoal(const basic::RobotPose &pose) {
+  geometry_msgs::msg::PoseStamped msg;
+  msg.header.frame_id = "map";
+  msg.header.stamp = node->get_clock()->now();
+  msg.pose.position.x = pose.x;
+  msg.pose.position.y = pose.y;
+  tf2::Quaternion q;
+  q.setRPY(0, 0, pose.theta);
+  msg.pose.orientation = tf2::toMsg(q);
+  nav_goal_publisher_->publish(msg);
+}
+void rclcomm::PubRobotSpeed(const basic::RobotSpeed &speed) {
+  geometry_msgs::msg::Twist msg;
+  msg.linear.x = speed.vx;
+  msg.linear.y = speed.vy;
+  msg.angular.z = speed.w;
+  speed_publisher_->publish(msg);
+}
+TopologyMap rclcomm::ConvertFromRosMsg(const topology_msgs::msg::TopologyMap::SharedPtr msg) {
+  TopologyMap map;
+  map.map_name = msg->map_name;
+  for (auto controller : msg->map_property.support_controllers) {
+    map.map_property.support_controllers.push_back(controller);
+  }
+  for (auto goal_checker : msg->map_property.support_goal_checkers) {
+    map.map_property.support_goal_checkers.push_back(goal_checker);
+  }
+  for (auto point : msg->points) {
+    TopologyMap::PointInfo p;
+    p.name = point.name;
+    p.x = point.x;
+    p.y = point.y;
+    p.theta = point.theta;
+    p.type = (PointType)point.type;
+    map.points.push_back(p);
+  }
+  for (auto route : msg->routes) {
+    TopologyMap::RouteInfo r;
+    r.controller = route.route_info.controller;
+    r.speed_limit = route.route_info.speed_limit;
+    r.goal_checker = route.route_info.goal_checker;
+    map.routes[route.from_point][route.to_point] = r;
+  }
+  return map;
+}
+topology_msgs::msg::TopologyMap rclcomm::ConvertToRosMsg(const TopologyMap& topology_map) {
+  topology_msgs::msg::TopologyMap msg;
+  msg.map_name = topology_map.map_name;
+  for (auto controller : topology_map.map_property.support_controllers) {
+    msg.map_property.support_controllers.push_back(controller);
+  }
+  for (auto goal_checker : topology_map.map_property.support_goal_checkers) {
+    msg.map_property.support_goal_checkers.push_back(goal_checker);
+  }
+  for (auto point : topology_map.points) {
+    topology_msgs::msg::Point point_msg;
+    point_msg.name = point.name;
+    point_msg.x = point.x;
+    point_msg.y = point.y;
+    point_msg.theta = point.theta;
+    point_msg.type = point.type;
+    msg.points.push_back(point_msg);
+  }
+  for (auto const& [from, to_map] : topology_map.routes) {
+    for (auto const& [to, info] : to_map) {
+      topology_msgs::msg::Route route_msg;
+      route_msg.from_point = from;
+      route_msg.to_point = to;
+      route_msg.route_info.controller = info.controller;
+      route_msg.route_info.speed_limit = info.speed_limit;
+      route_msg.route_info.goal_checker = info.goal_checker;
+      msg.routes.push_back(route_msg);
+    }
+  }
+  return msg;
+}
+void rclcomm::localCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+  basic::OccupancyMap cost_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
   for (int i = 0; i < msg->data.size(); i++) {
-    int x = int(i / width);
-    int y = i % width;
+    int x = i / msg->info.width;
+    int y = i % msg->info.width;
+    cost_map(x, y) = msg->data[i];
+  }
+  cost_map.SetFlip();
+  PUBLISH(MSG_ID_LOCAL_COST_MAP, cost_map);
+}
+void rclcomm::globalCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
+  basic::OccupancyMap cost_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
+  for (int i = 0; i < msg->data.size(); i++) {
+    int x = i / msg->info.width;
+    int y = i % msg->info.width;
     cost_map(x, y) = msg->data[i];
   }
   cost_map.SetFlip();
   PUBLISH(MSG_ID_GLOBAL_COST_MAP, cost_map);
 }
-void rclcomm::localCostMapCallback(
-    const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-  if (occ_map_.cols == 0 || occ_map_.rows == 0)
-    return;
-  int width = msg->info.width;
-  int height = msg->info.height;
-  double origin_x = msg->info.origin.position.x;
-  double origin_y = msg->info.origin.position.y;
-  tf2::Quaternion q;
-  tf2::fromMsg(msg->info.origin.orientation, q);
-  tf2::Matrix3x3 mat(q);
-  double roll, pitch, yaw;
-  mat.getRPY(roll, pitch, yaw);
-  double origin_theta = yaw;
-  basic::OccupancyMap cost_map(height, width,
-                               Eigen::Vector3d(origin_x, origin_y, 0),
-                               msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
-    int x = (int)i / width;
-    int y = i % width;
-    cost_map(x, y) = msg->data[i];
-  }
-  cost_map.SetFlip();
-  basic::OccupancyMap sized_cost_map = occ_map_;
-  basic::RobotPose origin_pose;
-  try {
-    // 坐标变换 将局部代价地图的基础坐标转换为map下 进行绘制显示
-    geometry_msgs::msg::PoseStamped pose_map_frame;
-    geometry_msgs::msg::PoseStamped pose_curr_frame;
-    pose_curr_frame.pose.position.x = origin_x;
-    pose_curr_frame.pose.position.y = origin_y;
-    q.setRPY(0, 0, origin_theta);
-    pose_curr_frame.pose.orientation = tf2::toMsg(q);
-    pose_curr_frame.header.frame_id = msg->header.frame_id;
-    tf_buffer_->transform(pose_curr_frame, pose_map_frame, "map");
-    tf2::fromMsg(pose_map_frame.pose.orientation, q);
-    tf2::Matrix3x3 mat(q);
-    double roll, pitch, yaw;
-    mat.getRPY(roll, pitch, yaw);
-
-    origin_pose.x = pose_map_frame.pose.position.x;
-    origin_pose.y = pose_map_frame.pose.position.y + cost_map.heightMap();
-    origin_pose.theta = yaw;
-  } catch (tf2::TransformException &ex) {
-    LOG_ERROR("getTransform localCostMapCallback error:" << ex.what());
-  }
-
-  double map_o_x, map_o_y;
-  occ_map_.xy2OccPose(origin_pose.x, origin_pose.y, map_o_x, map_o_y);
-  sized_cost_map.map_data.setZero();
-  for (int x = 0; x < occ_map_.rows; x++)
-    for (int y = 0; y < occ_map_.cols; y++) {
-      if (x > map_o_x && y > map_o_y && y < map_o_y + cost_map.rows &&
-          x < map_o_x + cost_map.cols) {
-        sized_cost_map(x, y) = cost_map(x - map_o_x, y - map_o_y);
-      } else {
-        sized_cost_map(x, y) = 0;
-      }
-    }
-  PUBLISH(MSG_ID_LOCAL_COST_MAP, sized_cost_map);
-}
 void rclcomm::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
-  double origin_x = msg->info.origin.position.x;
-  double origin_y = msg->info.origin.position.y;
-  int width = msg->info.width;
-  int height = msg->info.height;
-  double resolution = msg->info.resolution;
-  basic::OccupancyMap new_map(
-      height, width, Eigen::Vector3d(origin_x, origin_y, 0), resolution);
-
+  basic::OccupancyMap new_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
   for (int i = 0; i < msg->data.size(); i++) {
-    int x = int(i / width);
-    int y = i % width;
-    new_map(x, y) = msg->data[i];
+    int x = i / msg->info.width;
+    int y = i % msg->info.width;
+    new_map(x, y) = msg->data.at(i);
   }
   new_map.SetFlip();
-  
   occ_map_ = new_map;
   PUBLISH(MSG_ID_OCCUPANCY_MAP, new_map);
-}
-
-void rclcomm::PubRelocPose(const basic::RobotPose &pose) {
-  geometry_msgs::msg::PoseWithCovarianceStamped geo_pose;
-  geo_pose.header.frame_id = "map";
-  geo_pose.header.stamp = node->get_clock()->now();
-  geo_pose.pose.pose.position.x = pose.x;
-  geo_pose.pose.pose.position.y = pose.y;
-  tf2::Quaternion q;
-  q.setRPY(0, 0, pose.theta);
-  geo_pose.pose.pose.orientation = tf2::toMsg(q);
-  reloc_pose_publisher_->publish(geo_pose);
-}
-void rclcomm::PubNavGoal(const basic::RobotPose &pose) {
-  geometry_msgs::msg::PoseStamped geo_pose;
-  geo_pose.header.frame_id = "map";
-  geo_pose.header.stamp = node->get_clock()->now();
-  geo_pose.pose.position.x = pose.x;
-  geo_pose.pose.position.y = pose.y;
-  tf2::Quaternion q;
-  q.setRPY(0, 0, pose.theta);
-  geo_pose.pose.orientation = tf2::toMsg(q);
-  nav_goal_publisher_->publish(geo_pose);
-}
-void rclcomm::PubRobotSpeed(const basic::RobotSpeed &speed) {
-  geometry_msgs::msg::Twist twist;
-  twist.linear.x = speed.vx;
-  twist.linear.y = speed.vy;
-  twist.linear.z = 0;
-
-  twist.angular.x = 0;
-  twist.angular.y = 0;
-  twist.angular.z = speed.w;
-
-  // Publish it and resolve any remaining callbacks
-  speed_publisher_->publish(twist);
-}
-
-void rclcomm::robotFootprintCallback(const geometry_msgs::msg::PolygonStamped::SharedPtr msg) {
-  try {
-    geometry_msgs::msg::PointStamped point_map_frame;
-    geometry_msgs::msg::PointStamped point_footprint_frame;
-    basic::RobotPath footprint;
-    
-    for (const auto& point : msg->polygon.points) {
-      point_footprint_frame.point.x = point.x;
-      point_footprint_frame.point.y = point.y;
-      point_footprint_frame.header.frame_id = msg->header.frame_id;
-      
-      tf_buffer_->transform(point_footprint_frame, point_map_frame, "map");
-      
-      basic::Point p;
-      p.x = point_map_frame.point.x;
-      p.y = point_map_frame.point.y;
-      footprint.push_back(p);
-    }
-    
-    PUBLISH(MSG_ID_ROBOT_FOOTPRINT, footprint);
-  } catch (tf2::TransformException &ex) {
-    LOG_ERROR("robotFootprintCallback transform error: " << ex.what());
-  }
-}
-
-TopologyMap rclcomm::ConvertFromRosMsg(const topology_msgs::msg::TopologyMap::SharedPtr msg) {
-  TopologyMap topology_map;
-  
-  topology_map.map_name = msg->map_name;
-  
-  for (const auto& controller : msg->map_property.support_controllers) {
-    if(std::find(topology_map.map_property.support_controllers.begin(), topology_map.map_property.support_controllers.end(), controller) == topology_map.map_property.support_controllers.end()) {
-      topology_map.map_property.support_controllers.push_back(controller);
-    }
-    LOG_INFO("support controller:" << controller);
-  }
-
-  for (const auto& goal_checker : msg->map_property.support_goal_checkers) {
-    if(std::find(topology_map.map_property.support_goal_checkers.begin(), topology_map.map_property.support_goal_checkers.end(), goal_checker) == topology_map.map_property.support_goal_checkers.end()) {
-      topology_map.map_property.support_goal_checkers.push_back(goal_checker);
-    }
-    LOG_INFO("support goal checker:" << goal_checker);
-  }
-  
-  for (const auto& point_msg : msg->points) {
-    TopologyMap::PointInfo point_info;
-    point_info.name = point_msg.name;
-    point_info.x = point_msg.x;
-    point_info.y = point_msg.y;
-    point_info.theta = point_msg.theta;
-    point_info.type = static_cast<PointType>(point_msg.type);
-    topology_map.points.push_back(point_info);
-  }
-  
-  for (const auto& route_msg : msg->routes) {
-    TopologyMap::RouteInfo route_info;
-    route_info.controller = route_msg.route_info.controller;
-    route_info.speed_limit = route_msg.route_info.speed_limit;
-    route_info.goal_checker = route_msg.route_info.goal_checker;
-    topology_map.routes[route_msg.from_point][route_msg.to_point] = route_info;
-  }
-  
-  return topology_map;
-}
-
-topology_msgs::msg::TopologyMap rclcomm::ConvertToRosMsg(const TopologyMap& topology_map) {
-  topology_msgs::msg::TopologyMap msg;
-  
-  msg.map_name = topology_map.map_name;
-  
-  for (const auto& controller : topology_map.map_property.support_controllers) {
-    if(std::find(msg.map_property.support_controllers.begin(), msg.map_property.support_controllers.end(), controller) == msg.map_property.support_controllers.end()) {
-      msg.map_property.support_controllers.push_back(controller);
-    }
-  }
-
-  for (const auto& goal_checker : topology_map.map_property.support_goal_checkers) {
-    if(std::find(msg.map_property.support_goal_checkers.begin(), msg.map_property.support_goal_checkers.end(), goal_checker) == msg.map_property.support_goal_checkers.end()) {
-      msg.map_property.support_goal_checkers.push_back(goal_checker);
-    }
-  }
-  
-  for (const auto& point : topology_map.points) {
-    topology_msgs::msg::TopologyMapPointInfo point_msg;
-    point_msg.name = point.name;
-    point_msg.x = point.x;
-    point_msg.y = point.y;
-    point_msg.theta = point.theta;
-    point_msg.type = static_cast<uint8_t>(point.type);
-    msg.points.push_back(point_msg);
-  }
-  
-  for (const auto& from_routes : topology_map.routes) {
-    for (const auto& route : from_routes.second) {
-      topology_msgs::msg::RouteConnection route_msg;
-      route_msg.from_point = from_routes.first;
-      route_msg.to_point = route.first;
-      route_msg.route_info.controller = route.second.controller;
-      route_msg.route_info.speed_limit = route.second.speed_limit;
-      route_msg.route_info.goal_checker = route.second.goal_checker;
-      msg.routes.push_back(route_msg);
-    }
-  }
-  
-  return msg;
-}
-
-void rclcomm::topologyMapCallback(const topology_msgs::msg::TopologyMap::SharedPtr msg) {
-  TopologyMap topology_map = ConvertFromRosMsg(msg);
-  LOG_INFO("recv topology map:" << topology_map.map_name);
-  for (const auto& point : topology_map.points) {
-    LOG_INFO("point:" << point.name << " x:" << point.x << " y:" << point.y << " theta:" << point.theta);
-  }
-  for (const auto& route : topology_map.routes) {
-    for (const auto& route_info : route.second) {
-      LOG_INFO("route:" << route.first << " -> " << route_info.first << " controller:" << route_info.second.controller << " speed_limit:" << route_info.second.speed_limit);
-    }
-  }
-  PUBLISH(MSG_ID_TOPOLOGY_MAP, topology_map);
 }
