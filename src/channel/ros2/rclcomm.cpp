@@ -127,9 +127,9 @@ bool rclcomm::Start() {
             GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
 
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to create subscriptions: " << e.what());
+        LOG_ERROR("Core subscription failed: " << e.what());
     }
-
+        
     for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
       if (one_image_display.topic.empty()) continue;
       try {
@@ -231,6 +231,7 @@ void rclcomm::getRobotPose() {
 basic::RobotPose rclcomm::getTransform(std::string from, std::string to) {
   basic::RobotPose ret;
   try {
+    // 增加等待时间到 500ms，以应对 ROS2 发现阶段的延迟
     if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500))) return ret;
     geometry_msgs::msg::TransformStamped transform = tf_buffer_->lookupTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500));
     tf2::Quaternion q;
