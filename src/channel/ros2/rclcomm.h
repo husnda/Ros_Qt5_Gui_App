@@ -99,6 +99,7 @@ class rclcomm : public VirtualChannelNode {
   rclcpp::CallbackGroup::SharedPtr callback_group_laser;
   rclcpp::CallbackGroup::SharedPtr callback_group_other;
   std::atomic_bool init_flag_{false};
+  std::mutex executor_mutex_;
 
  private:
 };

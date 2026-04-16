@@ -952,7 +952,7 @@ void RosbridgeComm::ImageCallback(const ROSBridgePublishMsg &msg, const std::str
     }
   }
   
-  PUBLISH(MSG_ID_IMAGE, (std::pair<std::string, cv::Mat>(location, conversion_mat_)));
+  PUBLISH(MSG_ID_IMAGE, (std::pair<std::string, std::shared_ptr<cv::Mat>>(location, std::make_shared<cv::Mat>(conversion_mat_))));
 }
 
 /**

@@ -46,12 +46,13 @@ MainWindow::MainWindow(QWidget *parent)
   qRegisterMetaType<RobotPath>("RobotPath");
   qRegisterMetaType<MsgId>("MsgId");
   qRegisterMetaType<std::any>("std::any");
+  qRegisterMetaType<std::shared_ptr<cv::Mat>>("std::shared_ptr<cv::Mat>");
   qRegisterMetaType<TopologyMap>("TopologyMap");
   qRegisterMetaType<TopologyMap::PointInfo>("TopologyMap::PointInfo");
   setupUi();
-  openChannel();
   QTimer::singleShot(50, [=]() { 
     RestoreState();
+    openChannel();
     std::string map_path = Config::ConfigManager::Instance()->GetRootConfig().map_config.path;
     if (!map_path.empty()) {
       std::string yaml_path = map_path;
@@ -123,7 +124,9 @@ void MainWindow::registerChannel() {
   });
 
   SUBSCRIBE(MSG_ID_IMAGE, [this](const std::pair<std::string, std::shared_ptr<cv::Mat>>& location_to_mat) {
-      this->SlotRecvImage(location_to_mat.first, location_to_mat.second);
+      if (location_to_mat.second) {
+          emit this->signalRecvImage(location_to_mat.first, location_to_mat.second);
+      }
   });
 }
 
@@ -135,9 +138,31 @@ void MainWindow::RecvChannelMsg(const MsgId &id, const std::any &data) {
 
 
 void MainWindow::SlotRecvImage(const std::string &location, std::shared_ptr<cv::Mat> data) {
-  if (image_frame_map_.count(location)) {
-    QImage image(data->data, data->cols, data->rows, data->step[0], QImage::Format_RGB888);
-    image_frame_map_[location]->setImage(image);
+  // 1. 检查位置是否存在且指针有效
+  if (image_dock_map_.count(location) && image_frame_map_.count(location)) {
+    QPointer<ads::CDockWidget> dock_widget = image_dock_map_[location];
+    QPointer<RatioLayoutedFrame> frame = image_frame_map_[location];
+    
+    if (dock_widget.isNull() || frame.isNull()) return;
+
+    // 2. 核心性能优化：如果窗口不可见或已关闭，直接跳过
+    if (!dock_widget->isVisible() || dock_widget->isClosed()) {
+      return;
+    }
+
+    // 3. 内存与数据安全优化
+    if (data && !data->empty() && data->data) {
+      try {
+        QImage image(data->data, data->cols, data->rows, data->step[0], QImage::Format_RGB888);
+        if (!image.isNull() && !frame.isNull()) {
+            frame->setImage(image);
+        }
+      } catch (const std::exception& e) {
+        LOG_ERROR("Exception in SlotRecvImage: " << e.what());
+      } catch (...) {
+        LOG_ERROR("Unknown exception in SlotRecvImage");
+      }
+    }
   }
 }
 void MainWindow::closeChannel() { channel_manager_.CloseChannel(); }
@@ -759,16 +784,18 @@ void MainWindow::setupUi() {
 
   for (auto one_image : Config::ConfigManager::Instance()->GetRootConfig().images) {
     LOG_INFO("init image window location:" << one_image.location << " topic:" << one_image.topic);
-    image_frame_map_[one_image.location] = new RatioLayoutedFrame();
+    image_frame_map_[one_image.location] = new RatioLayoutedFrame(this);
     ads::CDockWidget *dock_widget = new ads::CDockWidget(std::string("image/" + one_image.location).c_str());
     dock_widget->setWidget(image_frame_map_[one_image.location]);
-
+    image_dock_map_[one_image.location] = dock_widget;
+    dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea, dock_widget);
     dock_widget->toggleView(false);
     ui->menuView->addAction(dock_widget->toggleViewAction());
   }
 
   //////////////////////////////////////////////////////槽链接
 
+  connect(this, &MainWindow::signalRecvImage, this, &MainWindow::SlotRecvImage, Qt::QueuedConnection);
   connect(this, SIGNAL(OnRecvChannelData(const MsgId &, const std::any &)),
           this, SLOT(RecvChannelMsg(const MsgId &, const std::any &)), Qt::BlockingQueuedConnection);
   connect(display_manager_, &Display::DisplayManager::signalPub2DPose,

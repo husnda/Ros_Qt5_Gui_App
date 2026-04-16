@@ -124,12 +124,12 @@ void RosNode::init() {
               cv::Mat conversion_mat_;
               try {
                 // 深拷贝转换为opencv类型
-                cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(
+                cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvCopy(
                     msg, sensor_msgs::image_encodings::RGB8);
                 conversion_mat_ = cv_ptr->image;
               } catch (cv_bridge::Exception &e) {
                 try {
-                  cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg);
+                  cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvCopy(msg);
                   if (msg->encoding == "CV_8UC3") {
                     // assuming it is rgb
                     conversion_mat_ = cv_ptr->image;

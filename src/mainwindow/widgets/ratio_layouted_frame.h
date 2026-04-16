@@ -91,7 +91,8 @@ protected:
 
   void setAspectRatio(unsigned short width, unsigned short height);
 
-  void paintEvent(QPaintEvent* event);
+  void paintEvent(QPaintEvent* event) override;
+  void resizeEvent(QResizeEvent* event) override;
 
 private:
 
@@ -107,6 +108,7 @@ private:
   mutable QMutex qimage_mutex_;
 
   bool smoothImage_;
+  bool in_resize_ = false;
 };
 
 
