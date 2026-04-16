@@ -105,6 +105,7 @@ private:
   QSize aspect_ratio_;
 
   QImage qimage_;
+  QImage scaled_image_;
   mutable QMutex qimage_mutex_;
 
   bool smoothImage_;
