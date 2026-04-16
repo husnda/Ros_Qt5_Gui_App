@@ -63,6 +63,17 @@ void RatioLayoutedFrame::setImage(const QImage& image)  //, QMutex* image_mutex)
   qimage_mutex_.lock();
   qimage_ = image.copy();
   setAspectRatio(qimage_.width(), qimage_.height());
+  // 核心优化：收到新图时立即预计算缩放图，避免在 paintEvent 中重复计算
+  if (smoothImage_ && !qimage_.isNull() && !contentsRect().isEmpty()) {
+      if (contentsRect().width() != qimage_.width() || contentsRect().height() != qimage_.height()) {
+          scaled_image_ = qimage_.scaled(contentsRect().width(), contentsRect().height(),
+                                        Qt::KeepAspectRatio, Qt::SmoothTransformation);
+      } else {
+          scaled_image_ = QImage(); // 尺寸一致不需要缩放
+      }
+  } else {
+      scaled_image_ = QImage();
+  }
   qimage_mutex_.unlock();
   emit delayed_update();
 }
@@ -159,20 +170,14 @@ void RatioLayoutedFrame::paintEvent(QPaintEvent* event) {
   QPainter painter(this);
   qimage_mutex_.lock();
   if (!qimage_.isNull() && !contentsRect().isEmpty()) {
-    // TODO: check if full draw is really necessary
-    //QPaintEvent* paint_event = dynamic_cast<QPaintEvent*>(event);
-    //painter.drawImage(paint_event->rect(), qimage_);
     if (!smoothImage_) {
       painter.drawImage(contentsRect(), qimage_);
     } else {
-      if (contentsRect().width() == qimage_.width()) {
-        painter.drawImage(contentsRect(), qimage_);
+      // 性能优化：优先使用缓存的缩放图
+      if (!scaled_image_.isNull()) {
+          painter.drawImage(contentsRect(), scaled_image_);
       } else {
-        QImage image = qimage_.scaled(contentsRect().width(), contentsRect().height(),
-                                      Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        if (!image.isNull()) {
-            painter.drawImage(contentsRect(), image);
-        }
+          painter.drawImage(contentsRect(), qimage_);
       }
     }
   } else {
@@ -189,6 +194,20 @@ void RatioLayoutedFrame::paintEvent(QPaintEvent* event) {
 void RatioLayoutedFrame::resizeEvent(QResizeEvent* event) {
   QFrame::resizeEvent(event);
   resizeToFitAspectRatio();
+  
+  // 核心优化：尺寸变化时更新缓存图
+  qimage_mutex_.lock();
+  if (smoothImage_ && !qimage_.isNull() && !contentsRect().isEmpty()) {
+      if (contentsRect().width() != qimage_.width() || contentsRect().height() != qimage_.height()) {
+          scaled_image_ = qimage_.scaled(contentsRect().width(), contentsRect().height(),
+                                        Qt::KeepAspectRatio, Qt::SmoothTransformation);
+      } else {
+          scaled_image_ = QImage();
+      }
+  } else {
+      scaled_image_ = QImage();
+  }
+  qimage_mutex_.unlock();
 }
 
 int RatioLayoutedFrame::greatestCommonDivisor(int a, int b) {
@@ -207,4 +226,6 @@ void RatioLayoutedFrame::mousePressEvent(QMouseEvent* mouseEvent) {
 
 void RatioLayoutedFrame::onSmoothImageChanged(bool checked) {
   smoothImage_ = checked;
+  // 状态变化时触发重绘和缓存刷新
+  update();
 }
