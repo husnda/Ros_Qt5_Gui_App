@@ -14,5 +14,6 @@ else
     exit 1
 fi
 
+ros2 daemon start
 # 2. Run the mock robot script
 python3 "$SCRIPT_DIR/mock_robot.py"
