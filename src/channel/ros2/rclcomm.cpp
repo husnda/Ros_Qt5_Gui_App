@@ -3,7 +3,7 @@
  * @Date: 2023-07-27 14:47:24
  * @LastEditors: chengyangkj chengyangkj@qq.com
  * @LastEditTime: 2023-10-15 09:14:17
- * @FilePath: /ros_qt5_gui_app/src/channel/ros1/rosnode.cpp
+ * @FilePath: /ros_qt5_gui_app/src/channel/ros2/rclcomm.cpp
  * @Description: ros2通讯类
  */
 #include "rclcomm.h"
