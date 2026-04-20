@@ -91,18 +91,60 @@ bool rclcomm::Start() {
             LOG_ERROR("Failed to subscribe to " << topic_key << " (" << GET_TOPIC_NAME(topic_key) << "): " << e.what());
         }
     };
+    
+    // Explicit type helpers because element_type::MessageT detection can be tricky with some rclcpp versions
+    auto create_safe_sub_occ = [&](const std::string& key, auto& sub, auto cb) {
+        try {
+            sub = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+                GET_TOPIC_NAME(key), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+                std::bind(cb, this, std::placeholders::_1), sub1_obt);
+        } catch (const std::exception& e) { LOG_ERROR("Failed: " << key << ": " << e.what()); }
+    };
 
-    create_safe_sub(DISPLAY_MAP, map_subscriber_, &rclcomm::map_callback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
-    create_safe_sub(DISPLAY_LOCAL_COST_MAP, local_cost_map_subscriber_, &rclcomm::localCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
-    create_safe_sub(DISPLAY_GLOBAL_COST_MAP, global_cost_map_subscriber_, &rclcomm::globalCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
-    create_safe_sub(DISPLAY_LASER, laser_scan_subscriber_, &rclcomm::laser_callback, rclcpp::QoS(20), sub_laser_obt);
-    create_safe_sub(MSG_ID_BATTERY_STATE, battery_state_subscriber_, &rclcomm::BatteryCallback, rclcpp::QoS(1), sub1_obt);
-    create_safe_sub(MSG_ID_DIAGNOSTIC, diagnostic_subscriber_, &rclcomm::diagnostic_callback, rclcpp::QoS(10), sub1_obt);
-    create_safe_sub(DISPLAY_GLOBAL_PATH, global_path_subscriber_, &rclcomm::path_callback, rclcpp::QoS(20), sub1_obt);
-    create_safe_sub(DISPLAY_LOCAL_PATH, local_path_subscriber_, &rclcomm::local_path_callback, rclcpp::QoS(20), sub1_obt);
-    create_safe_sub(DISPLAY_ROBOT, odometry_subscriber_, &rclcomm::odom_callback, rclcpp::QoS(20), sub1_obt);
-    create_safe_sub(DISPLAY_ROBOT_FOOTPRINT, robot_footprint_subscriber_, &rclcomm::robotFootprintCallback, rclcpp::QoS(20), sub1_obt);
-    create_safe_sub(DISPLAY_TOPOLOGY_MAP, topology_map_subscriber_, &rclcomm::topologyMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub_occ(DISPLAY_MAP, map_subscriber_, &rclcomm::map_callback);
+    create_safe_sub_occ(DISPLAY_LOCAL_COST_MAP, local_cost_map_subscriber_, &rclcomm::localCostMapCallback);
+    create_safe_sub_occ(DISPLAY_GLOBAL_COST_MAP, global_cost_map_subscriber_, &rclcomm::globalCostMapCallback);
+
+    try {
+        laser_scan_subscriber_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
+            GET_TOPIC_NAME(DISPLAY_LASER), 20, std::bind(&rclcomm::laser_callback, this, std::placeholders::_1), sub_laser_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed laser: " << e.what()); }
+
+    try {
+        battery_state_subscriber_ = node->create_subscription<sensor_msgs::msg::BatteryState>(
+            GET_TOPIC_NAME(MSG_ID_BATTERY_STATE), 1, std::bind(&rclcomm::BatteryCallback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed battery: " << e.what()); }
+
+    try {
+        diagnostic_subscriber_ = node->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+            GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC), 10, std::bind(&rclcomm::diagnostic_callback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed diagnostic: " << e.what()); }
+
+    try {
+        global_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
+            GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), 20, std::bind(&rclcomm::path_callback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed gpath: " << e.what()); }
+
+    try {
+        local_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
+            GET_TOPIC_NAME(DISPLAY_LOCAL_PATH), 20, std::bind(&rclcomm::local_path_callback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed lpath: " << e.what()); }
+
+    try {
+        odometry_subscriber_ = node->create_subscription<nav_msgs::msg::Odometry>(
+            GET_TOPIC_NAME(DISPLAY_ROBOT), 20, std::bind(&rclcomm::odom_callback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed odom: " << e.what()); }
+
+    try {
+        robot_footprint_subscriber_ = node->create_subscription<geometry_msgs::msg::PolygonStamped>(
+            GET_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT), 20, std::bind(&rclcomm::robotFootprintCallback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed footprint: " << e.what()); }
+
+    try {
+        topology_map_subscriber_ = node->create_subscription<topology_msgs::msg::TopologyMap>(
+            GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+            std::bind(&rclcomm::topologyMapCallback, this, std::placeholders::_1), sub1_obt);
+    } catch (const std::exception& e) { LOG_ERROR("Failed topology: " << e.what()); }
         
     try {
         topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(

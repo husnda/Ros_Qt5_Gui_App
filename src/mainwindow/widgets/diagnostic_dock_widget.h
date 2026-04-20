@@ -15,6 +15,10 @@ class DiagnosticDockWidget : public QWidget {
  public:
   explicit DiagnosticDockWidget(QWidget *parent = nullptr);
 
+ signals:
+  void signalSetSnapshot(const basic::DiagnosticSnapshot &snapshot);
+
+ public slots:
   void SetSnapshot(const basic::DiagnosticSnapshot &snapshot);
 
  private:

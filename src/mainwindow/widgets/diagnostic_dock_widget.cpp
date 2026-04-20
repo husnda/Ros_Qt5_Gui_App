@@ -12,6 +12,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <QThread>
 
 namespace {
 
@@ -159,24 +160,25 @@ DiagnosticDockWidget::DiagnosticDockWidget(QWidget *parent) : QWidget(parent) {
 
   filter_group_ = new QButtonGroup(this);
   filter_group_->setExclusive(true);
-  const struct {
-    const char *label;
-    int level;
-  } chips[] = {{"All", -1}, {"OK", 0}, {"Warning", 1}, {"Error", 2}, {"Stale", 3}};
+  
   auto *chip_layout = new QHBoxLayout();
   chip_layout->setSpacing(4);
+  
+  const QString chip_labels[] = {tr("All"), tr("OK"), tr("Warning"), tr("Error"), tr("Stale")};
+  const int chip_levels[] = {-1, 0, 1, 2, 3};
+
   for (int i = 0; i < 5; ++i) {
-    auto *b = new QPushButton(tr(chips[i].label));
+    auto *b = new QPushButton(chip_labels[i]);
     filter_chip_buttons_[i] = b;
     b->setCheckable(true);
     b->setFixedHeight(26);
-    b->setProperty("diagLevel", chips[i].level);
+    b->setProperty("diagLevel", chip_levels[i]);
     b->setStyleSheet(QStringLiteral(
         "QPushButton{padding:2px 8px;border-radius:10px;border:1px solid #ccc;background:#fff;}"
         "QPushButton:checked{font-weight:bold;background:#e3f2fd;border-color:#1976d2;}"));
     filter_group_->addButton(b);
     chip_layout->addWidget(b);
-    if (chips[i].level == -1) {
+    if (chip_levels[i] == -1) {
       b->setChecked(true);
     }
   }
@@ -228,6 +230,13 @@ DiagnosticDockWidget::DiagnosticDockWidget(QWidget *parent) : QWidget(parent) {
             RebuildUi();
           });
 
+  // Ensure thread-safe UI updates
+  connect(this, &DiagnosticDockWidget::signalSetSnapshot, this, [this](const basic::DiagnosticSnapshot &snapshot) {
+    snapshot_ = snapshot;
+    UpdateSummary();
+    RebuildUi();
+  }, Qt::QueuedConnection);
+
   UpdateSummary();
 }
 
@@ -270,9 +279,7 @@ QColor DiagnosticDockWidget::LevelColor(int level) {
 }
 
 void DiagnosticDockWidget::SetSnapshot(const basic::DiagnosticSnapshot &snapshot) {
-  snapshot_ = snapshot;
-  UpdateSummary();
-  RebuildUi();
+  emit signalSetSnapshot(snapshot);
 }
 
 void DiagnosticDockWidget::UpdateSummary() {
@@ -385,4 +392,3 @@ void DiagnosticDockWidget::RebuildUi() {
   }
   tree_->expandToDepth(0);
 }
-
