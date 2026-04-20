@@ -9,6 +9,10 @@
  */
 #include "mainwindow.h"
 #include <QDebug>
+#include <QEvent>
+#include <QFont>
+#include <QFontDatabase>
+#include <QMouseEvent>
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <QFileInfo>
@@ -22,12 +26,15 @@
 #include "FloatingDockContainer.h"
 #include "algorithm.h"
 #include "logger/logger.h"
+#include "config/config_manager.h"
 #include "ui_mainwindow.h"
 #include <QButtonGroup>
 #include <QMessageBox>
 
 #include "widgets/speed_ctrl.h"
 #include "widgets/display_config_widget.h"
+#include "widgets/diagnostic_dock_widget.h"
+#include "msg/diagnostic_snapshot.h"
 #include "display/manager/view_manager.h"
 #include <QTimer>
 using namespace ads;
@@ -35,6 +42,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow) {
   Q_INIT_RESOURCE(images);
   Q_INIT_RESOURCE(media);
+  Config::ConfigManager::Instance();
   LOG_INFO(" MainWindow init thread id" << QThread::currentThreadId());
   qRegisterMetaType<std::string>("std::string");
   qRegisterMetaType<RobotPose>("RobotPose");
@@ -76,17 +84,32 @@ bool MainWindow::openChannel() {
         if (channel->IsConnectionFailed()) {
           std::string error_msg = channel->GetConnectionError();
           std::string channel_name = channel->Name();
-          if (!error_msg.empty()) {
-            QMessageBox::critical(this, QString::fromStdString(channel_name) + " 连接失败", 
-                                  QString::fromStdString(error_msg),
-                                  QMessageBox::Ok);
+          if (channel_name == "ROSBridge") {
+            QString display_error = error_msg.empty()
+                                        ? "无法连接到 ROSBridge 服务器。"
+                                        : QString::fromStdString(error_msg);
+            QMessageBox::warning(this,
+                                 "ROSBridge 连接失败",
+                                 display_error +
+                                     "\n\n请在左侧「设置」面板中重新设置 ROSBridge 的 IP 和端口。",
+                                 QMessageBox::Ok);
+            LOG_ERROR("ROSBridge connection failed: " << error_msg);
           } else {
-            QMessageBox::critical(this, QString::fromStdString(channel_name) + " 连接失败", 
-                                  "无法连接到 " + QString::fromStdString(channel_name) + " 服务器。\n\n请检查：\n"
-                                  "1. 服务器是否正在运行\n"
-                                  "2. 配置是否正确\n"
-                                  "3. 网络连接是否正常",
-                                  QMessageBox::Ok);
+            LOG_ERROR("Channel " << channel_name << " connection failed: " << error_msg);
+            if (!error_msg.empty()) {
+              QMessageBox::critical(this,
+                                    QString::fromStdString(channel_name) + " 连接失败",
+                                    QString::fromStdString(error_msg),
+                                    QMessageBox::Ok);
+            } else {
+              QMessageBox::critical(this,
+                                    QString::fromStdString(channel_name) + " 连接失败",
+                                    "无法连接到 " + QString::fromStdString(channel_name) + " 服务器。\n\n请检查：\n"
+                                    "1. 服务器是否正在运行\n"
+                                    "2. 配置是否正确\n"
+                                    "3. 网络连接是否正常",
+                                    QMessageBox::Ok);
+            }
           }
         }
       });
@@ -127,6 +150,12 @@ void MainWindow::registerChannel() {
       if (location_to_mat.second) {
           emit this->signalRecvImage(location_to_mat.first, location_to_mat.second);
       }
+  });
+
+  SUBSCRIBE(MSG_ID_DIAGNOSTIC, [this](const basic::DiagnosticSnapshot &snap) {
+    if (diagnostic_dock_widget_) {
+      diagnostic_dock_widget_->SetSnapshot(snap);
+    }
   });
 }
 
@@ -169,6 +198,26 @@ void MainWindow::closeChannel() { channel_manager_.CloseChannel(); }
 MainWindow::~MainWindow() { delete ui; }
 void MainWindow::setupUi() {
   ui->setupUi(this);
+  setWindowFlags((windowFlags() | Qt::FramelessWindowHint) & ~Qt::WindowTitleHint);
+  setAttribute(Qt::WA_TranslucentBackground, false);
+
+  const QStringList preferredFontFamilies = {
+      "SF Pro Display",
+      "SF Pro Text",
+      ".AppleSystemUIFont",
+      "Segoe UI",
+      "Microsoft YaHei UI"};
+  const QStringList availableFontFamilies = QFontDatabase().families();
+  QString selectedFontFamily = "Microsoft YaHei UI";
+  for (const auto &fontFamily : preferredFontFamilies) {
+    if (availableFontFamilies.contains(fontFamily)) {
+      selectedFontFamily = fontFamily;
+      break;
+    }
+  }
+  QFont uiFont(selectedFontFamily, 10);
+  uiFont.setStyleStrategy(QFont::PreferAntialias);
+  this->setFont(uiFont);
   
   // 设置主窗体现代化样式
   this->setStyleSheet(R"(
@@ -237,8 +286,41 @@ void MainWindow::setupUi() {
   QVBoxLayout *center_layout = new QVBoxLayout();    //垂直
   QHBoxLayout *center_h_layout = new QHBoxLayout();  //水平
 
+  const QString window_ctrl_btn_style = R"(
+    QPushButton {
+      min-width: 28px;
+      max-width: 28px;
+      min-height: 24px;
+      max-height: 24px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background-color: #ffffff;
+      color: #333333;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 0;
+    }
+    QPushButton:hover {
+      background-color: #f5f5f5;
+      border-color: #1976d2;
+    }
+    QPushButton:pressed {
+      background-color: #e3f2fd;
+    }
+  )";
+
+  QWidget *tools_strip = new QWidget();
+  custom_title_bar_ = tools_strip;
+  tools_strip->installEventFilter(this);
+  tools_strip->setStyleSheet(R"(
+    QWidget {
+      background-color: #ffffff;
+      border-bottom: 1px solid #e0e0e0;
+    }
+  )");
+
   ///////////////////////////////////////////////////////////////地图工具栏
-  QHBoxLayout *horizontalLayout_tools = new QHBoxLayout();
+  QHBoxLayout *horizontalLayout_tools = new QHBoxLayout(tools_strip);
   horizontalLayout_tools->setSpacing(6);
   horizontalLayout_tools->setObjectName(
       QString::fromUtf8(" horizontalLayout_tools"));
@@ -343,7 +425,7 @@ void MainWindow::setupUi() {
   re_save_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   re_save_map_btn->setStyleSheet(modernToolButtonStyle);
   horizontalLayout_tools->addWidget(re_save_map_btn);
-  center_layout->addLayout(horizontalLayout_tools);
+  center_layout->addWidget(tools_strip);
 
   horizontalLayout_tools->addItem(
       new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum));
@@ -396,6 +478,31 @@ void MainWindow::setupUi() {
     }
   )");
   horizontalLayout_tools->addWidget(label_power_);
+
+  horizontalLayout_tools->addSpacing(12);
+  QPushButton *min_btn = new QPushButton(QStringLiteral("-"), this);
+  QPushButton *max_btn = new QPushButton(QStringLiteral("\u25A1"), this);
+  QPushButton *close_btn = new QPushButton(QStringLiteral("\u00d7"), this);
+  min_btn->setStyleSheet(window_ctrl_btn_style);
+  max_btn->setStyleSheet(window_ctrl_btn_style);
+  close_btn->setStyleSheet(window_ctrl_btn_style +
+                          "\nQPushButton:hover { background-color: #ef5350; color: white; "
+                          "border-color: #ef5350; }");
+  connect(min_btn, &QPushButton::clicked, this, &QWidget::showMinimized);
+  connect(max_btn, &QPushButton::clicked, [this, max_btn]() {
+    if (isMaximized()) {
+      showNormal();
+      max_btn->setText(QStringLiteral("\u25A1"));
+    } else {
+      showMaximized();
+      max_btn->setText(QStringLiteral("\u2750"));
+    }
+  });
+  connect(close_btn, &QPushButton::clicked, this, &QWidget::close);
+  horizontalLayout_tools->addWidget(min_btn);
+  horizontalLayout_tools->addWidget(max_btn);
+  horizontalLayout_tools->addWidget(close_btn);
+
   SlotSetBatteryStatus(0, 0);
   
   //////////////////////////////////////////////////////////////编辑地图工具栏 - 现代化设计
@@ -613,19 +720,29 @@ void MainWindow::setupUi() {
   ui->menuView->addAction(SpeedCtrlDockWidget->toggleViewAction());
 
   ////////////////////////////////////////////////////////图层配置管理
-  DisplayConfigWidget *display_config_widget_ = new DisplayConfigWidget();
+  display_config_widget_ = new DisplayConfigWidget();
   display_config_widget_->SetDisplayManager(display_manager_);
-  display_config_widget_->SetChannelList(channel_manager_.DiscoveryAllChannel());
-  ads::CDockWidget *DisplayConfigDockWidget = new ads::CDockWidget("ConfigManager");
-  DisplayConfigDockWidget->setWidget(display_config_widget_);
-  DisplayConfigDockWidget->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
-  DisplayConfigDockWidget->setMinimumSize(250, 200);
-  DisplayConfigDockWidget->setMaximumSize(400, 9999);
+  display_config_widget_->SetChannelList(channel_manager_.DiscoveryChannelTypes());
+  settings_dock_ = new ads::CDockWidget(tr("Setting"));
+  settings_dock_->setWidget(display_config_widget_);
+  settings_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
+  settings_dock_->setMinimumSize(320, 240);
+  settings_dock_->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
   auto display_config_area =
       dock_manager_->addDockWidget(ads::DockWidgetArea::LeftDockWidgetArea,
-                                   DisplayConfigDockWidget, center_docker_area_);
-  DisplayConfigDockWidget->toggleView(true);
-  ui->menuView->addAction(DisplayConfigDockWidget->toggleViewAction());
+                                   settings_dock_, center_docker_area_);
+  settings_dock_->toggleView(true);
+  ui->menuView->addAction(settings_dock_->toggleViewAction());
+
+  diagnostic_dock_widget_ = new DiagnosticDockWidget();
+  diagnostic_dock_ = new ads::CDockWidget(tr("Diagnostic"));
+  diagnostic_dock_->setWidget(diagnostic_dock_widget_);
+  diagnostic_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
+  diagnostic_dock_->setMinimumSize(280, 200);
+  dock_manager_->addDockWidget(ads::DockWidgetArea::RightDockWidgetArea, diagnostic_dock_,
+                               center_docker_area_);
+  diagnostic_dock_->toggleView(false);
+  ui->menuView->addAction(diagnostic_dock_->toggleViewAction());
 
   /////////////////////////////////////////////////////////导航任务列表
   QWidget *task_list_widget = new QWidget();
@@ -781,7 +898,6 @@ void MainWindow::setupUi() {
       SLOT(UpdateSelectPoint(const TopologyMap::PointInfo &)));
 
   //////////////////////////////////////////////////////图片
-
   for (auto one_image : Config::ConfigManager::Instance()->GetRootConfig().images) {
     LOG_INFO("init image window location:" << one_image.location << " topic:" << one_image.topic);
     image_frame_map_[one_image.location] = new RatioLayoutedFrame(this);
@@ -964,6 +1080,39 @@ void MainWindow::setupUi() {
   connect(display_manager_->GetDisplay(DISPLAY_MAP),
           SIGNAL(signalCursorPose(QPointF)), this,
           SLOT(signalCursorPose(QPointF)));
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (watched == custom_title_bar_) {
+    if (event->type() == QEvent::MouseButtonPress) {
+      QMouseEvent *mouse_event = static_cast<QMouseEvent *>(event);
+      if (mouse_event->button() == Qt::LeftButton) {
+        dragging_window_ = true;
+        drag_position_ = mouse_event->globalPos() - frameGeometry().topLeft();
+        return true;
+      }
+    } else if (event->type() == QEvent::MouseMove) {
+      if (dragging_window_ && !isMaximized()) {
+        QMouseEvent *mouse_event = static_cast<QMouseEvent *>(event);
+        move(mouse_event->globalPos() - drag_position_);
+        return true;
+      }
+    } else if (event->type() == QEvent::MouseButtonRelease) {
+      QMouseEvent *mouse_event = static_cast<QMouseEvent *>(event);
+      if (mouse_event->button() == Qt::LeftButton) {
+        dragging_window_ = false;
+        return true;
+      }
+    } else if (event->type() == QEvent::MouseButtonDblClick) {
+      if (isMaximized()) {
+        showNormal();
+      } else {
+        showMaximized();
+      }
+      return true;
+    }
+  }
+  return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::signalCursorPose(QPointF pos) {

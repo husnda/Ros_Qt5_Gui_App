@@ -12,7 +12,6 @@
 #include <QOpenGLWidget>
 #include "algorithm.h"
 #include "display/manager/scene_manager.h"
-#include "logger/logger.h"
 #include "core/framework/framework.h"
 namespace Display {
 
@@ -59,8 +58,8 @@ DisplayManager::DisplayManager() {
           SLOT(slotRobotScenePoseChanged(const RobotPose &)));
   // 设置默认地图图层响应鼠标事件
   FactoryDisplay::Instance()->SetMoveEnable(DISPLAY_MAP);
+  graphics_view_ptr_->SetDisplayManagerPtr(this);
   InitUi();
-  
   SUBSCRIBE(MSG_ID_TOPOLOGY_MAP, [this](const TopologyMap& data) {
     scene_manager_ptr_->UpdateTopologyMap(data);
   }, Framework::ExecutionPolicy::kBackground);
@@ -285,7 +284,12 @@ void DisplayManager::StartReloc() {
   }
 }
 void DisplayManager::SetEditMapMode(MapEditMode mode) { scene_manager_ptr_->SetEditMapMode(mode); }
-void DisplayManager::SetToolRange(double range) { scene_manager_ptr_->SetToolRange(range); }
+void DisplayManager::SetToolRange(double range) {
+  if (!scene_manager_ptr_) {
+    return;
+  }
+  scene_manager_ptr_->SetToolRange(range);
+}
 double DisplayManager::GetEraserRange() const { return scene_manager_ptr_->GetEraserRange(); }
 double DisplayManager::GetPenRange() const { return scene_manager_ptr_->GetPenRange(); }
 void DisplayManager::AddOneNavPoint() { scene_manager_ptr_->AddOneNavPoint(); }

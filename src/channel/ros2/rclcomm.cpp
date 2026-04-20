@@ -13,6 +13,7 @@
 #include "config/config_manager.h"
 #include "logger/logger.h"
 #include "core/framework/framework.h"
+#include "msg/diagnostic_snapshot.h"
 #include "msg/msg_info.h"
 
 rclcomm::rclcomm() {
@@ -27,6 +28,7 @@ rclcomm::rclcomm() {
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT, "/odom")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED, "/cmd_vel")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_BATTERY_STATE, "/battery")
+  SET_DEFAULT_TOPIC_NAME(MSG_ID_DIAGNOSTIC, "/diagnostics")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT, "/local_costmap/published_footprint")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP, "/map/topology")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE, "/map/topology/update")
@@ -98,6 +100,10 @@ bool rclcomm::Start() {
     battery_state_subscriber_ = node->create_subscription<sensor_msgs::msg::BatteryState>(
         GET_TOPIC_NAME(MSG_ID_BATTERY_STATE), 1,
         std::bind(&rclcomm::BatteryCallback, this, std::placeholders::_1), sub1_obt);
+
+    diagnostic_subscriber_ = node->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+        GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC), 10,
+        std::bind(&rclcomm::diagnostic_callback, this, std::placeholders::_1), sub1_obt);
 
     global_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
         GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), 20,
@@ -198,6 +204,7 @@ bool rclcomm::Stop() {
     global_cost_map_subscriber_.reset();
     laser_scan_subscriber_.reset();
     battery_state_subscriber_.reset();
+    diagnostic_subscriber_.reset();
     global_path_subscriber_.reset();
     local_path_subscriber_.reset();
     odometry_subscriber_.reset();
@@ -232,6 +239,29 @@ void rclcomm::BatteryCallback(
   map["percent"] = std::to_string(msg->percentage);
   map["voltage"] = std::to_string(msg->voltage);
   PUBLISH(MSG_ID_BATTERY_STATE, map);
+}
+
+void rclcomm::diagnostic_callback(
+    const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg) {
+  basic::DiagnosticSnapshot snapshot;
+  const int64_t stamp_ms =
+      static_cast<int64_t>(msg->header.stamp.sec) * 1000LL +
+      static_cast<int64_t>(msg->header.stamp.nanosec) / 1000000LL;
+  for (const auto &st : msg->status) {
+    std::string hardware_id = st.hardware_id;
+    if (hardware_id.empty()) {
+      hardware_id = "unknown_hardware";
+    }
+    basic::DiagnosticComponentState comp;
+    comp.level = static_cast<int>(st.level);
+    comp.message = st.message;
+    comp.last_update_ms = stamp_ms;
+    for (const auto &kv : st.values) {
+      comp.key_values[kv.key] = kv.value;
+    }
+    snapshot.hardware[hardware_id][st.name] = std::move(comp);
+  }
+  PUBLISH(MSG_ID_DIAGNOSTIC, snapshot);
 }
 
 void rclcomm::getRobotPose() {
@@ -287,7 +317,7 @@ void rclcomm::local_path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     geometry_msgs::msg::PointStamped point_map_frame;
     geometry_msgs::msg::PointStamped point_odom_frame;
     basic::RobotPath path;
-    for (int i = 0; i < msg->poses.size(); i++) {
+    for (int i = 0; i < (int)msg->poses.size(); i++) {
       point_odom_frame.point.x = msg->poses.at(i).pose.position.x;
       point_odom_frame.point.y = msg->poses.at(i).pose.position.y;
       point_odom_frame.header.frame_id = msg->header.frame_id;
@@ -316,7 +346,7 @@ void rclcomm::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
     geometry_msgs::msg::PointStamped point_map_frame;
     geometry_msgs::msg::PointStamped point_odom_frame;
     basic::RobotPath path;
-    for (int i = 0; i < msg->poses.size(); i++) {
+    for (int i = 0; i < (int)msg->poses.size(); i++) {
       point_odom_frame.point.x = msg->poses.at(i).pose.position.x;
       point_odom_frame.point.y = msg->poses.at(i).pose.position.y;
       point_odom_frame.header.frame_id = msg->header.frame_id;
@@ -339,7 +369,7 @@ void rclcomm::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
     geometry_msgs::msg::PointStamped point_base_frame;
     geometry_msgs::msg::PointStamped point_laser_frame;
     basic::LaserScan laser_points;
-    for (int i = 0; i < msg->ranges.size(); i++) {
+    for (int i = 0; i < (int)msg->ranges.size(); i++) {
       double angle = angle_min + i * angle_increment;
       double dist = msg->ranges[i];
       if (std::isinf(dist)) continue;
@@ -467,7 +497,7 @@ topology_msgs::msg::TopologyMap rclcomm::ConvertToRosMsg(const TopologyMap& topo
 
 void rclcomm::localCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
   basic::OccupancyMap cost_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = i / msg->info.width;
     int y = i % msg->info.width;
     cost_map(x, y) = msg->data[i];
@@ -478,7 +508,7 @@ void rclcomm::localCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr
 
 void rclcomm::globalCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
   basic::OccupancyMap cost_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = i / msg->info.width;
     int y = i % msg->info.width;
     cost_map(x, y) = msg->data[i];
@@ -489,7 +519,7 @@ void rclcomm::globalCostMapCallback(const nav_msgs::msg::OccupancyGrid::SharedPt
 
 void rclcomm::map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg) {
   basic::OccupancyMap new_map(msg->info.height, msg->info.width, Eigen::Vector3d(msg->info.origin.position.x, msg->info.origin.position.y, 0), msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = i / msg->info.width;
     int y = i % msg->info.width;
     new_map(x, y) = msg->data.at(i);

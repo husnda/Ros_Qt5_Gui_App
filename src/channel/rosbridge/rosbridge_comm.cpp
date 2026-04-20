@@ -6,6 +6,7 @@
 
 #include "rosbridge_comm.h"
 #include "include/ros_time.h"
+#include "msg/diagnostic_snapshot.h"
 #include <cmath>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -13,6 +14,15 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+
+namespace {
+std::string NormalizeFrameId(const std::string &frame_id) {
+  if (!frame_id.empty() && frame_id[0] == '/') {
+    return frame_id.substr(1);
+  }
+  return frame_id;
+}
+}  // namespace
 
 /**
  * @brief 构造函数，初始化默认配置
@@ -33,6 +43,7 @@ RosbridgeComm::RosbridgeComm() {
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT, "/local_costmap/published_footprint")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP, "/map/topology")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE, "/map/topology/update")
+  SET_DEFAULT_TOPIC_NAME(MSG_ID_DIAGNOSTIC, "/diagnostics")
   
   // 设置默认键值配置
   SET_DEFAULT_KEY_VALUE("BaseFrameId", "base_link")
@@ -51,10 +62,11 @@ RosbridgeComm::RosbridgeComm() {
   
   // 设置默认图像配置
   if (Config::ConfigManager::Instance()->GetRootConfig().images.empty()) {
-    Config::ConfigManager::Instance()->GetRootConfig().images.push_back(
-        Config::ImageDisplayConfig{.location = "front",
-                                   .topic = "/camera/front/image_raw",
-                                   .enable = true});
+    Config::ImageDisplayConfig default_image_config;
+    default_image_config.location = "front";
+    default_image_config.topic = "/camera/front/image_raw";
+    default_image_config.enable = true;
+    Config::ConfigManager::Instance()->GetRootConfig().images.push_back(default_image_config);
   }
   Config::ConfigManager::Instance()->StoreConfig();
 }
@@ -83,15 +95,17 @@ bool RosbridgeComm::Start() {
 }
 
 void RosbridgeComm::ConnectAsync() {
+  LOG_INFO("Starting ROSBridge connection...");
   // 创建WebSocket连接
   websocket_connection_ = std::make_unique<SocketWebSocketConnection>();
+  LOG_INFO("WebSocket connection created");
   websocket_connection_->RegisterErrorCallback([this](TransportError err) {
     std::lock_guard<std::mutex> lock(error_msg_mutex_);
     if (err == TransportError::R2C_CONNECTION_CLOSED) {
-      connection_error_msg_ = "ROSBridge 连接已关闭";
+      connection_error_msg_ = "ROSBridge connection closed";
       LOG_ERROR("ROSBridge connection closed");
     } else if (err == TransportError::R2C_SOCKET_ERROR) {
-      connection_error_msg_ = "ROSBridge 网络连接错误";
+      connection_error_msg_ = "ROSBridge socket error";
       LOG_ERROR("ROSBridge socket error");
     }
     connection_failed_ = true;
@@ -110,6 +124,7 @@ void RosbridgeComm::ConnectAsync() {
     }
   });
   
+  LOG_INFO("Creating ROSBridge instance");
   // 创建ROSBridge实例
   ros_bridge_ = std::make_unique<ROSBridge>(*websocket_connection_);
   
@@ -117,11 +132,12 @@ void RosbridgeComm::ConnectAsync() {
   LOG_INFO("Attempting to connect to ROSBridge server at " << rosbridge_ip_ << ":" << rosbridge_port_);
   if (!ros_bridge_->Init(rosbridge_ip_, rosbridge_port_)) {
     std::lock_guard<std::mutex> lock(error_msg_mutex_);
-    connection_error_msg_ = "无法连接到 ROSBridge 服务器 " + rosbridge_ip_ + ":" + std::to_string(rosbridge_port_) + 
-                            "\n\n请检查：\n"
-                            "1. ROSBridge 服务器是否正在运行\n"
-                            "2. IP 地址和端口是否正确\n"
-                            "3. 网络连接是否正常";
+    connection_error_msg_ =
+        "Failed to connect to ROSBridge server " + rosbridge_ip_ + ":" + std::to_string(rosbridge_port_) +
+        "\n\nPlease check:\n"
+        "1. ROSBridge server is running\n"
+        "2. IP and port are correct\n"
+        "3. Network is reachable";
     LOG_ERROR("Failed to connect to ROSBridge server!");
     connection_failed_ = true;
     connecting_ = false;
@@ -198,6 +214,12 @@ void RosbridgeComm::ConnectAsync() {
   callback_handles_[GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP)] = topology_map_topic->Subscribe(
       [this](const ROSBridgePublishMsg &msg) { TopologyMapCallback(msg); });
   subscribers_[GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP)] = std::move(topology_map_topic);
+  
+  auto diagnostic_topic = std::make_unique<ROSTopic>(
+      *ros_bridge_, GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC), "diagnostic_msgs/DiagnosticArray", 1);
+  callback_handles_[GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC)] = diagnostic_topic->Subscribe(
+      [this](const ROSBridgePublishMsg &msg) { DiagnosticCallback(msg); });
+  subscribers_[GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC)] = std::move(diagnostic_topic);
   
   // 图像话题订阅（动态配置）
   for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
@@ -547,6 +569,23 @@ void RosbridgeComm::LocalCostMapCallback(const ROSBridgePublishMsg &msg) {
   int width = info["width"].GetInt();
   int height = info["height"].GetInt();
   double resolution = info["resolution"].GetDouble();
+
+  std::string frame_id = "map";
+  if (msg_json.HasMember("header") && msg_json["header"].HasMember("frame_id") &&
+      msg_json["header"]["frame_id"].IsString()) {
+    frame_id = NormalizeFrameId(msg_json["header"]["frame_id"].GetString());
+  }
+  if (frame_id != "map") {
+    basic::RobotPose tf_map_from_frame = GetTransform("map", frame_id);
+    basic::RobotPose local_origin_pose;
+    local_origin_pose.x = origin_x;
+    local_origin_pose.y = origin_y;
+    local_origin_pose.theta = origin_theta;
+    basic::RobotPose map_origin_pose = basic::absoluteSum(tf_map_from_frame, local_origin_pose);
+    origin_x = map_origin_pose.x;
+    origin_y = map_origin_pose.y;
+    origin_theta = map_origin_pose.theta;
+  }
   
   // 创建代价地图
   basic::OccupancyMap cost_map(height, width, Eigen::Vector3d(origin_x, origin_y, 0), resolution);
@@ -702,6 +741,17 @@ void RosbridgeComm::LocalPathCallback(const ROSBridgePublishMsg &msg) {
   
   const auto &msg_json = msg.msg_json_;
   if (!msg_json.HasMember("poses")) return;
+
+  std::string frame_id = "map";
+  if (msg_json.HasMember("header") && msg_json["header"].HasMember("frame_id") &&
+      msg_json["header"]["frame_id"].IsString()) {
+    frame_id = NormalizeFrameId(msg_json["header"]["frame_id"].GetString());
+  }
+  const bool need_tf = (frame_id != "map");
+  basic::RobotPose tf_map_from_frame;
+  if (need_tf) {
+    tf_map_from_frame = GetTransform("map", frame_id);
+  }
   
   // 提取路径点
   basic::RobotPath path;
@@ -712,6 +762,9 @@ void RosbridgeComm::LocalPathCallback(const ROSBridgePublishMsg &msg) {
       basic::Point point;
       point.x = pose["x"].GetDouble();
       point.y = pose["y"].GetDouble();
+      if (need_tf) {
+        point = basic::absoluteSum(tf_map_from_frame, point);
+      }
       path.push_back(point);
     }
   }
@@ -736,6 +789,131 @@ void RosbridgeComm::BatteryCallback(const ROSBridgePublishMsg &msg) {
     map["voltage"] = std::to_string(msg_json["voltage"].GetDouble());
   }
   PUBLISH(MSG_ID_BATTERY_STATE, map);
+}
+
+namespace {
+
+int64_t DiagnosticStampMs(const rapidjson::Value &msg_json) {
+  int64_t stamp_ms = 0;
+  if (msg_json.HasMember("header") && msg_json["header"].IsObject()) {
+    const auto &header = msg_json["header"];
+    if (header.HasMember("stamp") && header["stamp"].IsObject()) {
+      const auto &st = header["stamp"];
+      int64_t sec = 0;
+      if (st.HasMember("sec")) {
+        const auto &sv = st["sec"];
+        if (sv.IsInt64()) {
+          sec = sv.GetInt64();
+        } else if (sv.IsInt()) {
+          sec = sv.GetInt();
+        } else if (sv.IsUint()) {
+          sec = static_cast<int64_t>(sv.GetUint());
+        }
+      }
+      int64_t nsec = 0;
+      if (st.HasMember("nanosec")) {
+        const auto &nv = st["nanosec"];
+        if (nv.IsInt64()) {
+          nsec = nv.GetInt64();
+        } else if (nv.IsInt()) {
+          nsec = nv.GetInt();
+        } else if (nv.IsUint()) {
+          nsec = static_cast<int64_t>(nv.GetUint());
+        }
+      } else if (st.HasMember("nsec")) {
+        const auto &nv = st["nsec"];
+        if (nv.IsInt64()) {
+          nsec = nv.GetInt64();
+        } else if (nv.IsInt()) {
+          nsec = nv.GetInt();
+        } else if (nv.IsUint()) {
+          nsec = static_cast<int64_t>(nv.GetUint());
+        }
+      }
+      stamp_ms = sec * 1000 + nsec / 1000000;
+    }
+  }
+  if (stamp_ms <= 0) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  }
+  return stamp_ms;
+}
+
+int DiagnosticLevelFromJson(const rapidjson::Value &v) {
+  if (v.IsInt()) {
+    return v.GetInt();
+  }
+  if (v.IsUint()) {
+    return static_cast<int>(v.GetUint());
+  }
+  if (v.IsInt64()) {
+    return static_cast<int>(v.GetInt64());
+  }
+  return 0;
+}
+
+}  // namespace
+
+void RosbridgeComm::DiagnosticCallback(const ROSBridgePublishMsg &msg) {
+  if (msg.msg_json_.IsNull()) {
+    return;
+  }
+  const auto &msg_json = msg.msg_json_;
+  if (!msg_json.HasMember("status") || !msg_json["status"].IsArray()) {
+    return;
+  }
+  const int64_t stamp_ms = DiagnosticStampMs(msg_json);
+  basic::DiagnosticSnapshot snapshot;
+  const auto &arr = msg_json["status"].GetArray();
+  for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+    const auto &st = arr[i];
+    if (!st.IsObject()) {
+      continue;
+    }
+    int level = 0;
+    if (st.HasMember("level")) {
+      level = DiagnosticLevelFromJson(st["level"]);
+    }
+    std::string name;
+    if (st.HasMember("name") && st["name"].IsString()) {
+      name = st["name"].GetString();
+    }
+    std::string message;
+    if (st.HasMember("message") && st["message"].IsString()) {
+      message = st["message"].GetString();
+    }
+    std::string hardware_id;
+    if (st.HasMember("hardware_id") && st["hardware_id"].IsString()) {
+      hardware_id = st["hardware_id"].GetString();
+    }
+    if (hardware_id.empty()) {
+      hardware_id = "unknown_hardware";
+    }
+    basic::DiagnosticComponentState comp;
+    comp.level = level;
+    comp.message = std::move(message);
+    comp.last_update_ms = stamp_ms;
+    if (st.HasMember("values") && st["values"].IsArray()) {
+      for (const auto &kv : st["values"].GetArray()) {
+        if (!kv.IsObject()) {
+          continue;
+        }
+        std::string k;
+        std::string vval;
+        if (kv.HasMember("key") && kv["key"].IsString()) {
+          k = kv["key"].GetString();
+        }
+        if (kv.HasMember("value") && kv["value"].IsString()) {
+          vval = kv["value"].GetString();
+        }
+        comp.key_values[k] = std::move(vval);
+      }
+    }
+    snapshot.hardware[hardware_id][name] = std::move(comp);
+  }
+  PUBLISH(MSG_ID_DIAGNOSTIC, snapshot);
 }
 
 /**
@@ -783,6 +961,17 @@ void RosbridgeComm::RobotFootprintCallback(const ROSBridgePublishMsg &msg) {
   
   const auto &msg_json = msg.msg_json_;
   if (!msg_json.HasMember("polygon") || !msg_json["polygon"].HasMember("points")) return;
+
+  std::string frame_id = "map";
+  if (msg_json.HasMember("header") && msg_json["header"].HasMember("frame_id") &&
+      msg_json["header"]["frame_id"].IsString()) {
+    frame_id = NormalizeFrameId(msg_json["header"]["frame_id"].GetString());
+  }
+  const bool need_tf = (frame_id != "map");
+  basic::RobotPose tf_map_from_frame;
+  if (need_tf) {
+    tf_map_from_frame = GetTransform("map", frame_id);
+  }
   
   // 提取机器人足迹多边形点
   basic::RobotPath footprint;
@@ -792,6 +981,9 @@ void RosbridgeComm::RobotFootprintCallback(const ROSBridgePublishMsg &msg) {
       basic::Point p;
       p.x = points[i]["x"].GetDouble();
       p.y = points[i]["y"].GetDouble();
+      if (need_tf) {
+        p = basic::absoluteSum(tf_map_from_frame, p);
+      }
       footprint.push_back(p);
     }
   }

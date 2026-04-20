@@ -5,6 +5,10 @@
  * @LastEditTime: 2023-10-05 11:39:01
  * @FilePath: /ROS2_Qt5_Gui_App/src/main.cpp
  */
+#ifndef SDL_MAIN_HANDLED
+#define SDL_MAIN_HANDLED
+#endif
+
 #include <QApplication>
 #include <QLabel>
 #include <QMovie>
@@ -22,18 +26,18 @@ void signalHandler(int signal) {
   if (signal == SIGINT || signal == SIGTERM) {
     if (g_app) {
       g_app->exit(0);
+    }
   }
-}
 }
 
 int main(int argc, char *argv[]) {
   QApplication a(argc, argv);
   g_app = &a;
-  
+
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
 
   ApplicationManager manager_;
-  LOG_INFO("ros_qt5_gui_app init!")
+  LOG_INFO("ros_qt5_gui_app init!");
   return a.exec();
 }

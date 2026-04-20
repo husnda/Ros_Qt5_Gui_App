@@ -22,19 +22,20 @@ Logger::Logger() {
   // 设置配置文件
   el::Loggers::reconfigureLogger("default", defaultConf);
 
-  /// 防止Fatal级别日志中断程序
+  el::Loggers::addFlag(el::LoggingFlag::ImmediateFlush);
+  // 防止Fatal级别日志中断程序
   el::Loggers::addFlag(el::LoggingFlag::DisableApplicationAbortOnFatalLog);
 }
 Logger::~Logger() {}
 void Logger::Log(LogLevel level, const std::stringstream& message, const char* file, int line) {
   switch (level) {
-    case LogLevel::INFO:
+    case LogLevel::kInfo:
       LOG(INFO) << "[" << file << ":" << line << "] " << message.str();
       break;
-    case LogLevel::ERROR:
+    case LogLevel::kError:
       LOG(ERROR) << "[" << file << ":" << line << "] " << message.str();
       break;
-    case LogLevel::WARN:
+    case LogLevel::kWarn:
       LOG(WARNING) << "[" << file << ":" << line << "] " << message.str();
       break;
   }

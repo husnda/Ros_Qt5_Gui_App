@@ -21,6 +21,9 @@
 #include <QToolBar>
 #include <QTreeView>
 #include <QWidgetAction>
+#include <QPoint>
+#include <QEvent>
+#include <QPointer>
 #include <opencv2/imgproc/imgproc.hpp>
 #include "DockAreaWidget.h"
 #include "DockManager.h"
@@ -43,6 +46,9 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+class DiagnosticDockWidget;
+class DisplayConfigWidget;
+
 class MainWindow : public QMainWindow {
   Q_OBJECT
 
@@ -59,6 +65,7 @@ class MainWindow : public QMainWindow {
 
  protected:
   virtual void closeEvent(QCloseEvent *event) override;
+  bool eventFilter(QObject *watched, QEvent *event) override;
 
  private:
   QAction *SavePerspectiveAction = nullptr;
@@ -77,9 +84,16 @@ class MainWindow : public QMainWindow {
   QProgressBar *battery_bar_;
   QLabel *label_power_;
   ads::CDockAreaWidget *center_docker_area_;
+  QWidget *custom_title_bar_{nullptr};
+  bool dragging_window_{false};
+  QPoint drag_position_;
   std::map<std::string, QPointer<RatioLayoutedFrame>> image_frame_map_;
   std::map<std::string, QPointer<ads::CDockWidget>> image_dock_map_;
   std::string map_path_{"./map"};
+  DisplayConfigWidget *display_config_widget_{nullptr};
+  ads::CDockWidget *settings_dock_{nullptr};
+  DiagnosticDockWidget *diagnostic_dock_widget_{nullptr};
+  ads::CDockWidget *diagnostic_dock_{nullptr};
   
  signals:
   void OnRecvChannelData(const MsgId &id, const std::any &data);
