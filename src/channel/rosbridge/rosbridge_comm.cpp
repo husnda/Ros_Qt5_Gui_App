@@ -268,25 +268,25 @@ void RosbridgeComm::ConnectAsync() {
   
   // ========== 订阅内部消息总线 ==========
   
-  SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
+  AddSubscription(MSG_ID_SET_NAV_GOAL_POSE, SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
     LOG_INFO("recv nav goal pose:" << pose);
     PubNavGoal(pose);
-  });
+  }));
   
-  SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
+  AddSubscription(MSG_ID_SET_RELOC_POSE, SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
     LOG_INFO("recv reloc pose:" << pose);
     PubRelocPose(pose);
-  });
+  }));
   
-  SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
+  AddSubscription(MSG_ID_SET_ROBOT_SPEED, SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
     LOG_INFO("recv robot speed:" << speed);
     PubRobotSpeed(speed);
-  });
+  }));
   
-  SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
+  AddSubscription(MSG_ID_TOPOLOGY_MAP_UPDATE, SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
     LOG_INFO("recv topology map update:" << topology_map.map_name);
     PubTopologyMapUpdate(topology_map);
-  });
+  }));
   
   init_flag_ = true;
 }
@@ -322,6 +322,9 @@ bool RosbridgeComm::Stop() {
     websocket_connection_->Disconnect();
   }
   websocket_connection_.reset();
+
+  ClearSubscriptions();
+
   return true;
 }
 

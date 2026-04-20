@@ -1,71 +1,42 @@
-/*
- * @Author: chengyang chengyangkj@outlook.com
- * @Date: 2023-03-29 14:21:31
- * @LastEditors: chengyangkj chengyangkj@qq.com
- * @LastEditTime: 2023-10-15 09:31:36
- * @FilePath:
- * ////include/display/display_manager.h
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置
- * 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
- */
-#pragma once
-#include "algorithm.h"
+#ifndef DISPLAY_MANAGER_H
+#define MAINWINDOW_DISPLAY_MANAGER_H
 
-#include <Eigen/Dense>
-#include <QGraphicsScene>
-#include <QGraphicsView>
-#include <QLabel>
-#include <QPushButton>
-#include <QtWidgets/QVBoxLayout>
 #include <any>
-#include <functional>
 #include <map>
-#include "config/config_manager.h"
-#include "map/topology_map.h"
-#include "display/manager/view_manager.h"
+#include <string>
+#include <vector>
+
+#include <QObject>
+#include <QPointF>
+#include <QTimer>
+
 #include "display/display_cost_map.h"
-#include "display/manager/display_factory.h"
+#include "display/display_demo.h"
 #include "display/display_occ_map.h"
 #include "display/display_path.h"
 #include "display/laser_points.h"
+#include "display/manager/display_factory.h"
 #include "display/point_shape.h"
 #include "display/robot_shape.h"
+#include "display/virtual_display.h"
+#include "display/manager/view_manager.h"
+#include "display/manager/scene_manager.h"
 #include "widgets/set_pose_widget.h"
-// group
-#define GROUP_MAP "Group_Map"
+#include "occupancy_map.h"
+#include "topology_map.h"
+#include "core/framework/framework.h"
+
 namespace Display {
 
-class SceneManager;
 class DisplayManager : public QObject {
   Q_OBJECT
  public:
- private:
-  std::map<std::string, std::any> display_map_;
-
-  RobotPose robot_pose_{0, 0, 0};
-  RobotPose robot_pose_goal_{0, 0, 0};
-  OccupancyMap map_data_;
-  std::string focus_display_;
-  RobotPose local_cost_world_pose_;
-  OccupancyMap local_cost_map_;
-  double global_scal_value_ = 1;
-  bool is_reloc_mode_{false};
-  ViewManager *graphics_view_ptr_;
-  SetPoseWidget *set_reloc_pose_widget_;
-  SceneManager *scene_manager_ptr_;
-  bool init_flag_{false};
-
-
- signals:
-  void cursorPosMap(QPointF);
-  void signalPub2DPose(const RobotPose &pose);
-  void signalPub2DGoal(const RobotPose &pose);
-  void signalTopologyMapUpdate(const TopologyMap &map);
-  void signalCurrentSelectPointChanged(const TopologyMap::PointInfo &);
-  void signalPubMap(const OccupancyMap &map);
-  void signalEditMapModeChanged(MapEditMode mode);
- public slots:
-  void updateScaled(double value);
+  DisplayManager();
+  ~DisplayManager();
+  bool SetDisplayConfig(const std::string &config_name, const std::any &data);
+  VirtualDisplay *GetDisplay(const std::string &name);
+  void UpdateRobotPose(const RobotPose &pose);
+  void SetRelocMode(bool is_start);
   void StartReloc();
   void SetEditMapMode(MapEditMode mode);
   void SetToolRange(double range);
@@ -73,44 +44,61 @@ class DisplayManager : public QObject {
   double GetPenRange() const;
   void AddOneNavPoint();
   void AddPointAtRobotPosition();
-  void slotRobotScenePoseChanged(const RobotPose &pose);
-  void slotSetRobotPose(const RobotPose &pose);
-  void FocusDisplay(const std::string &display_type);
-  void SetScaleBig();
-  void SetScaleSmall();
-
+  OccupancyMap &GetMap();
   OccupancyMap GetOccupancyMap();
   void UpdateOCCMap(const OccupancyMap &map);
   TopologyMap GetTopologyMap();
   void UpdateTopologyMap(const TopologyMap &topology_map);
+  void SetScaleBig();
+  void SetScaleSmall();
+  QWidget *GetViewPtr() { return graphics_view_ptr_; }
+  void FocusDisplay(const std::string &display_name);
+  RobotPose wordPose2Scene(const RobotPose &point);
+  QPointF wordPose2Scene(const QPointF &point);
+  RobotPose wordPose2Map(const RobotPose &pose);
+  QPointF wordPose2Map(const QPointF &pose);
+  RobotPose mapPose2Word(const RobotPose &pose);
+  RobotPose scenePoseToWord(const RobotPose &pose);
+  RobotPose scenePoseToMap(const RobotPose &pose);
+
+ signals:
+  void signalPub2DPose(const RobotPose &pose);
+  void signalPub2DGoal(const RobotPose &pose);
+  void signalTopologyMapUpdate(const TopologyMap &topology_map);
+  void signalCurrentSelectPointChanged(const TopologyMap::PointInfo &point);
+  void signalEditMapModeChanged(MapEditMode mode);
+
+ public slots:
+  void slotRobotScenePoseChanged(const RobotPose &pose);
+  void slotSetRobotPose(const RobotPose &pose);
+  void updateScaled(double value);
+
+ private slots:
+  void signalCursorPose(QPointF pos);
 
  private:
   void InitUi();
   std::vector<Point> transLaserPoint(const std::vector<Point> &point);
-  QPushButton *btn_move_focus_;
 
- public:
-  DisplayManager();
-  ~DisplayManager();
-  QGraphicsView *GetViewPtr() { return graphics_view_ptr_; }
-  VirtualDisplay *GetDisplay(const std::string &name);
-  QPointF wordPose2Scene(const QPointF &point);
-  RobotPose wordPose2Scene(const RobotPose &point);
-  QPointF wordPose2Map(const QPointF &pose);
-  RobotPose wordPose2Map(const RobotPose &pose);
-  RobotPose mapPose2Word(const RobotPose &pose);
-  RobotPose scenePoseToWord(const RobotPose &pose);
-  RobotPose scenePoseToMap(const RobotPose &pose);
-  void UpdateRobotPose(const RobotPose &pose);
-  bool SetDisplayConfig(const std::string &config_name, const std::any &data);
-  void SetRelocMode(bool is_move);
-  void SetNavGoalMode(bool is_start);
-  OccupancyMap &GetMap();
-  RobotPose GetRobotPose() { return robot_pose_; }
-  void SetFocusOn(const std::string &display_type) {
-    focus_display_ = display_type;
+  ViewManager *graphics_view_ptr_;
+  SceneManager *scene_manager_ptr_;
+  RobotPose robot_pose_;
+  OccupancyMap map_data_;
+  bool is_reloc_mode_ = false;
+  SetPoseWidget *set_reloc_pose_widget_;
+
+  std::map<std::string, std::vector<Framework::MessageBus::CallbackId>> subscription_ids_;
+  void AddSubscription(const std::string& topic, Framework::MessageBus::CallbackId id) {
+    subscription_ids_[topic].push_back(id);
   }
-  
+  void ClearSubscriptions() {
+    for (auto& [topic, ids] : subscription_ids_) {
+      for (auto id : ids) {
+        UNSUBSCRIBE(topic, id);
+      }
+    }
+    subscription_ids_.clear();
+  }
 };
-
 }  // namespace Display
+#endif

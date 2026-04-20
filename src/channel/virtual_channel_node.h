@@ -10,6 +10,8 @@
 #include <any>
 #include <atomic>
 #include <thread>
+#include <vector>
+#include <map>
 #include "msg/msg_info.h"
 #include "occupancy_map.h"
 #include "topology_map.h"
@@ -19,6 +21,7 @@ using namespace basic;
 class VirtualChannelNode {
  private:
   std::thread process_thread_;
+  std::map<std::string, std::vector<Framework::MessageBus::CallbackId>> subscription_ids_;
 
  public:
   VirtualChannelNode(/* args */) {}
@@ -41,9 +44,28 @@ class VirtualChannelNode {
   void ShutDown() {
     run_flag_ = false;
     Stop();
-    process_thread_.join();
+    if (process_thread_.joinable()) {
+      process_thread_.join();
+    }
+    ClearSubscriptions();
   }
-  virtual ~VirtualChannelNode() {}
+  virtual ~VirtualChannelNode() {
+    ClearSubscriptions();
+  }
+
+  void AddSubscription(const std::string& topic, Framework::MessageBus::CallbackId id) {
+    subscription_ids_[topic].push_back(id);
+  }
+
+  void ClearSubscriptions() {
+    for (auto& [topic, ids] : subscription_ids_) {
+      for (auto id : ids) {
+        UNSUBSCRIBE(topic, id);
+      }
+    }
+    subscription_ids_.clear();
+  }
+
   virtual void Process() {}
   virtual bool Start() = 0;
   virtual bool Stop() = 0;

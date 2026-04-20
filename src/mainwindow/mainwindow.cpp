@@ -127,11 +127,13 @@ bool MainWindow::openChannel(const std::string &channel_name) {
   return false;
 }
 void MainWindow::registerChannel() {
-  SUBSCRIBE(MSG_ID_ODOM_POSE, [this](const RobotState& data) {
-    updateOdomInfo(data);
-  });
+  ClearSubscriptions();
 
-  SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& robot_pose) {
+  AddSubscription(MSG_ID_ODOM_POSE, SUBSCRIBE(MSG_ID_ODOM_POSE, [this](const RobotState& data) {
+    updateOdomInfo(data);
+  }));
+
+  AddSubscription(MSG_ID_ROBOT_POSE, SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& robot_pose) {
       nav_goal_table_view_->UpdateRobotPose(robot_pose);
       Display::ViewManager* view_manager = dynamic_cast<Display::ViewManager*>(display_manager_->GetViewPtr());
       if (view_manager) {
@@ -139,30 +141,24 @@ void MainWindow::registerChannel() {
                                      QString::number(robot_pose.y, 'f', 2) + ", " + 
                                      QString::number(robot_pose.theta, 'f', 2) + ")");
       }
-  });
+  }));
 
-  SUBSCRIBE(MSG_ID_BATTERY_STATE, [this](const std::map<std::string, std::string>& map) {
+  AddSubscription(MSG_ID_BATTERY_STATE, SUBSCRIBE(MSG_ID_BATTERY_STATE, [this](const std::map<std::string, std::string>& map) {
     this->SlotSetBatteryStatus(std::stod(map.at("percent")),
                                std::stod(map.at("voltage")));
-  });
+  }));
 
-  SUBSCRIBE(MSG_ID_IMAGE, [this](const std::pair<std::string, std::shared_ptr<cv::Mat>>& location_to_mat) {
+  AddSubscription(MSG_ID_IMAGE, SUBSCRIBE(MSG_ID_IMAGE, [this](const std::pair<std::string, std::shared_ptr<cv::Mat>>& location_to_mat) {
       if (location_to_mat.second) {
           emit this->signalRecvImage(location_to_mat.first, location_to_mat.second);
       }
-  });
+  }));
 
-  SUBSCRIBE(MSG_ID_DIAGNOSTIC, [this](const basic::DiagnosticSnapshot &snap) {
+  AddSubscription(MSG_ID_DIAGNOSTIC, SUBSCRIBE(MSG_ID_DIAGNOSTIC, [this](const basic::DiagnosticSnapshot &snap) {
     if (diagnostic_dock_widget_) {
       diagnostic_dock_widget_->SetSnapshot(snap);
     }
-  });
-}
-
-
-void MainWindow::RecvChannelMsg(const MsgId &id, const std::any &data) {
-  // 保留此方法以兼容现有代码，但不再使用
-  // 数据现在通过 message_bus 订阅接收
+  }));
 }
 
 
@@ -194,7 +190,10 @@ void MainWindow::SlotRecvImage(const std::string &location, std::shared_ptr<cv::
     }
   }
 }
-void MainWindow::closeChannel() { channel_manager_.CloseChannel(); }
+void MainWindow::closeChannel() { 
+    channel_manager_.CloseChannel(); 
+    ClearSubscriptions();
+}
 MainWindow::~MainWindow() { delete ui; }
 void MainWindow::setupUi() {
   ui->setupUi(this);
@@ -912,8 +911,6 @@ void MainWindow::setupUi() {
   //////////////////////////////////////////////////////槽链接
 
   connect(this, &MainWindow::signalRecvImage, this, &MainWindow::SlotRecvImage, Qt::QueuedConnection);
-  connect(this, SIGNAL(OnRecvChannelData(const MsgId &, const std::any &)),
-          this, SLOT(RecvChannelMsg(const MsgId &, const std::any &)), Qt::BlockingQueuedConnection);
   connect(display_manager_, &Display::DisplayManager::signalPub2DPose,
           [this](const RobotPose &pose) {
             PUBLISH(MSG_ID_SET_RELOC_POSE, pose);
@@ -1132,9 +1129,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   // Delete dock manager here to delete all floating widgets. This ensures
   // that all top level windows of the dock manager are properly closed
   // write state
-
-  disconnect(this, SIGNAL(OnRecvChannelData(const MsgId &, const std::any &)),
-             this, SLOT(RecvChannelMsg(const MsgId &, const std::any &)));
+  closeChannel();
   SaveState();
   dock_manager_->deleteLater();
   QMainWindow::closeEvent(event);

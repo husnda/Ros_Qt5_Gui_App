@@ -53,7 +53,9 @@ basic::RobotPose Convert(const geometry_msgs::Pose &pose) {
   return robot_pose;
 }
 
-RosNode::~RosNode() {}
+RosNode::~RosNode() {
+    Stop();
+}
 /// @brief loop for rate
 void RosNode::Process() {
   if (ros::ok()) {
@@ -71,18 +73,18 @@ bool RosNode::Start() {
   ros::start();
   init();
   
-  SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
+  AddSubscription(MSG_ID_SET_NAV_GOAL_POSE, SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
     std::cout << "recv nav goal pose:" << pose << std::endl;
     PubNavGoal(pose);
-  });
-  SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
+  }));
+  AddSubscription(MSG_ID_SET_RELOC_POSE, SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
     std::cout << "recv reloc pose:" << pose << std::endl;
     PubRelocPose(pose);
-  });
-  SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
+  }));
+  AddSubscription(MSG_ID_SET_ROBOT_SPEED, SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
     std::cout << "recv robot speed:" << speed << std::endl;
     PubRobotSpeed(speed);
-  });
+  }));
   
   return true;
 }
@@ -184,6 +186,7 @@ void RosNode::init() {
 
 bool RosNode::Stop() {
   ros::shutdown();
+  ClearSubscriptions();
   return true;
 }
 
@@ -236,7 +239,7 @@ void RosNode::MapCallback(nav_msgs::OccupancyGrid::ConstPtr msg) {
   occ_map_ = basic::OccupancyMap(
       height, width, Eigen::Vector3d(origin_x, origin_y, 0), resolution);
 
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = int(i / width);
     int y = i % width;
     occ_map_(x, y) = msg->data[i];
@@ -256,7 +259,7 @@ void RosNode::LocalCostMapCallback(nav_msgs::OccupancyGrid::ConstPtr msg) {
   basic::OccupancyMap cost_map(height, width,
                                Eigen::Vector3d(origin_x, origin_y, 0),
                                msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = (int)i / width;
     int y = i % width;
     cost_map(x, y) = msg->data[i];
@@ -303,7 +306,7 @@ void RosNode::GlobalCostMapCallback(nav_msgs::OccupancyGrid::ConstPtr msg) {
   basic::OccupancyMap cost_map(height, width,
                                Eigen::Vector3d(origin_x, origin_y, 0),
                                msg->info.resolution);
-  for (int i = 0; i < msg->data.size(); i++) {
+  for (int i = 0; i < (int)msg->data.size(); i++) {
     int x = int(i / width);
     int y = i % width;
     cost_map(x, y) = msg->data[i];
@@ -321,7 +324,7 @@ void RosNode::LaserScanCallback(sensor_msgs::LaserScanConstPtr msg) {
     geometry_msgs::PointStamped point_base_frame;
     geometry_msgs::PointStamped point_laser_frame;
     basic::LaserScan laser_points;
-    for (int i = 0; i < msg->ranges.size(); i++) {
+    for (int i = 0; i < (int)msg->ranges.size(); i++) {
       // 计算当前偏移角度
       double angle = angle_min + i * angle_increment;
       double dist = msg->ranges[i];
@@ -359,7 +362,7 @@ void RosNode::GlobalPathCallback(nav_msgs::Path::ConstPtr msg) {
     geometry_msgs::PointStamped point_map_frame;
     geometry_msgs::PointStamped point_odom_frame;
     basic::RobotPath path;
-    for (int i = 0; i < msg->poses.size(); i++) {
+    for (int i = 0; i < (int)msg->poses.size(); i++) {
       double x = msg->poses.at(i).pose.position.x;
       double y = msg->poses.at(i).pose.position.y;
       point_odom_frame.point.x = x;
@@ -384,7 +387,7 @@ void RosNode::LocalPathCallback(nav_msgs::Path::ConstPtr msg) {
     geometry_msgs::PointStamped point_map_frame;
     geometry_msgs::PointStamped point_odom_frame;
     basic::RobotPath path;
-    for (int i = 0; i < msg->poses.size(); i++) {
+    for (int i = 0; i < (int)msg->poses.size(); i++) {
       double x = msg->poses.at(i).pose.position.x;
       double y = msg->poses.at(i).pose.position.y;
       point_odom_frame.point.x = x;

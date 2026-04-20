@@ -59,28 +59,29 @@ DisplayManager::DisplayManager() {
   FactoryDisplay::Instance()->SetMoveEnable(DISPLAY_MAP);
   graphics_view_ptr_->SetDisplayManagerPtr(this);
   InitUi();
-  SUBSCRIBE(MSG_ID_TOPOLOGY_MAP, [this](const TopologyMap& data) {
-    scene_manager_ptr_->UpdateTopologyMap(data);
-  }, Framework::ExecutionPolicy::kBackground);
   
-  SUBSCRIBE(MSG_ID_OCCUPANCY_MAP, [this](const OccupancyMap& data) {
+  AddSubscription(MSG_ID_TOPOLOGY_MAP, SUBSCRIBE(MSG_ID_TOPOLOGY_MAP, [this](const TopologyMap& data) {
+    scene_manager_ptr_->UpdateTopologyMap(data);
+  }, Framework::ExecutionPolicy::kBackground));
+  
+  AddSubscription(MSG_ID_OCCUPANCY_MAP, SUBSCRIBE(MSG_ID_OCCUPANCY_MAP, [this](const OccupancyMap& data) {
     map_data_ = data;
-  }, Framework::ExecutionPolicy::kBackground);
+  }, Framework::ExecutionPolicy::kBackground));
 
-  SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& data) {
+  AddSubscription(MSG_ID_ROBOT_POSE, SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& data) {
     // LOG_INFO("robot pose update:" << data.x << " " << data.y << " " << data.theta);
     if (!is_reloc_mode_) {
       UpdateRobotPose(data);
     }
-  });
+  }));
 
-  SUBSCRIBE(MSG_ID_LASER_SCAN, [this](const LaserScan& data) {
+  AddSubscription(MSG_ID_LASER_SCAN, SUBSCRIBE(MSG_ID_LASER_SCAN, [this](const LaserScan& data) {
     auto* laser_display = dynamic_cast<LaserPoints*>(GetDisplay(DISPLAY_LASER));
     if (laser_display) {
       std::vector<Point> transformed_points = transLaserPoint(data.data);
       laser_display->UpdateLaserData(data.id, transformed_points);
     }
-  }, Framework::ExecutionPolicy::kBackground);
+  }, Framework::ExecutionPolicy::kBackground));
 }
 
 void DisplayManager::slotSetRobotPose(const RobotPose &pose) {
@@ -122,7 +123,9 @@ void DisplayManager::InitUi() {
   connect(set_reloc_pose_widget_, SIGNAL(SignalPoseChanged(const RobotPose &)),
           this, SLOT(slotSetRobotPose(const RobotPose &)));
 }
-DisplayManager::~DisplayManager() {}
+DisplayManager::~DisplayManager() {
+  ClearSubscriptions();
+}
 
 bool DisplayManager::SetDisplayConfig(const std::string &config_name,
                                       const std::any &data) {
@@ -266,7 +269,7 @@ RobotPose DisplayManager::scenePoseToWord(const RobotPose &pose) {
   QPointF pose_map = FactoryDisplay::Instance()
                          ->GetDisplay(DISPLAY_MAP)
                          ->mapFromScene(QPointF(pose.x, pose.y));
-  return mapPose2Word(RobotPose(pose_map.x(), pose_map.y(), pose.theta));
+  return mapPose2Word(RobotPose(pose_map.x(), map_map.y(), pose.theta));
 }
 RobotPose DisplayManager::scenePoseToMap(const RobotPose &pose) {
   QPointF pose_map = FactoryDisplay::Instance()

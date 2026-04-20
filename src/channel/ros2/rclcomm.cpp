@@ -169,19 +169,19 @@ bool rclcomm::Start() {
     return false;
   }
 
-  SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
+  AddSubscription(MSG_ID_SET_NAV_GOAL_POSE, SUBSCRIBE(MSG_ID_SET_NAV_GOAL_POSE, [this](const basic::RobotPose& pose) {
     PubNavGoal(pose);
-  });
-  SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
+  }));
+  AddSubscription(MSG_ID_SET_RELOC_POSE, SUBSCRIBE(MSG_ID_SET_RELOC_POSE, [this](const basic::RobotPose& pose) {
     PubRelocPose(pose);
-  });
-  SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
+  }));
+  AddSubscription(MSG_ID_SET_ROBOT_SPEED, SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
     PubRobotSpeed(speed);
-  });
-  SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
+  }));
+  AddSubscription(MSG_ID_TOPOLOGY_MAP_UPDATE, SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
     topology_msgs::msg::TopologyMap ros_msg = ConvertToRosMsg(topology_map);
     topology_map_update_publisher_->publish(ros_msg);
-  });
+  }));
 
   init_flag_ = true;
   return true;
@@ -226,6 +226,8 @@ bool rclcomm::Stop() {
     node.reset();
     m_executor.reset();
     
+    ClearSubscriptions();
+
     if (rclcpp::ok()) {
         rclcpp::shutdown();
     }
@@ -488,7 +490,7 @@ topology_msgs::msg::TopologyMap rclcomm::ConvertToRosMsg(const TopologyMap& topo
       route_msg.to_point = to;
       route_msg.route_info.controller = info.controller;
       route_msg.route_info.speed_limit = info.speed_limit;
-      route_msg.route_info.goal_checker = info.goal_checker;
+      route_info.goal_checker = info.goal_checker;
       msg.routes.push_back(route_msg);
     }
   }

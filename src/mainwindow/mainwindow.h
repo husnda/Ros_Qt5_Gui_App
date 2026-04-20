@@ -40,6 +40,8 @@
 #include "core/framework/framework.h"
 #include <memory>
 #include <vector>
+#include <map>
+
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -57,7 +59,6 @@ class MainWindow : public QMainWindow {
   ~MainWindow();
  public slots:
   void signalCursorPose(QPointF pos);
-  void RecvChannelMsg(const MsgId &id, const std::any &data);
   void updateOdomInfo(RobotState state);
   void RestoreState();
   void SlotSetBatteryStatus(double percent, double voltage);
@@ -94,9 +95,21 @@ class MainWindow : public QMainWindow {
   ads::CDockWidget *settings_dock_{nullptr};
   DiagnosticDockWidget *diagnostic_dock_widget_{nullptr};
   ads::CDockWidget *diagnostic_dock_{nullptr};
+
+  std::map<std::string, std::vector<Framework::MessageBus::CallbackId>> subscription_ids_;
+  void AddSubscription(const std::string& topic, Framework::MessageBus::CallbackId id) {
+    subscription_ids_[topic].push_back(id);
+  }
+  void ClearSubscriptions() {
+    for (auto& [topic, ids] : subscription_ids_) {
+      for (auto id : ids) {
+        UNSUBSCRIBE(topic, id);
+      }
+    }
+    subscription_ids_.clear();
+  }
   
  signals:
-  void OnRecvChannelData(const MsgId &id, const std::any &data);
   void signalRecvImage(const std::string &location, std::shared_ptr<cv::Mat> data);
   
  private:
