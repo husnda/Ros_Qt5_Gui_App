@@ -55,7 +55,7 @@ class RatioLayoutedFrame
 
 public:
 
-  RatioLayoutedFrame(QWidget* parent=nullptr, Qt::WindowFlags flags = 0);
+  RatioLayoutedFrame(QWidget* parent=nullptr, Qt::WindowFlags flags = {});
 
   virtual ~RatioLayoutedFrame();
 

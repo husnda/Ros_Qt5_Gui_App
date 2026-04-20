@@ -32,7 +32,7 @@ find_package(Eigen3 REQUIRED)
 # options
 option(BUILD_WITH_CHANNEL_AUTO "Auto detect ROS environment" ON)
 option(BUILD_WITH_CHANNEL_ROS1 "Build with ROS1 native support" OFF)
-option(BUILD_WITH_CHANNEL_ROS2 "Build with ROS2 native support" OFF)
+option(BUILD_WITH_CHANNEL_ROS2 "Build with ROS2 native support" ON)
 option(BUILD_WITH_CHANNEL_ROSBRIDGE "Build with ROSBridge support" ON)
 option(BUILD_WITH_TEST "Build tests" OFF)
 
