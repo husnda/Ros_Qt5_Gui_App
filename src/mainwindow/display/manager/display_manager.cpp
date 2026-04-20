@@ -18,7 +18,6 @@ namespace Display {
 DisplayManager::DisplayManager() {
   graphics_view_ptr_ = new ViewManager();
   scene_manager_ptr_ = new SceneManager();
-  graphics_view_ptr_->SetDisplayManagerPtr(this);
   scene_manager_ptr_->Init(graphics_view_ptr_, this);
   // 设置绘制区域
   FactoryDisplay::Instance()->Init(graphics_view_ptr_, scene_manager_ptr_);
