@@ -490,7 +490,7 @@ topology_msgs::msg::TopologyMap rclcomm::ConvertToRosMsg(const TopologyMap& topo
       route_msg.to_point = to;
       route_msg.route_info.controller = info.controller;
       route_msg.route_info.speed_limit = info.speed_limit;
-      route_info.goal_checker = info.goal_checker;
+      route_msg.route_info.goal_checker = info.goal_checker;
       msg.routes.push_back(route_msg);
     }
   }

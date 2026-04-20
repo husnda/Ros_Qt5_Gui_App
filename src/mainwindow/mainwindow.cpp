@@ -690,13 +690,13 @@ void MainWindow::setupUi() {
     }
   )");
   center_widget->setLayout(center_layout);
-  CDockWidget *CentralDockWidget = new CDockWidget("CentralWidget");
+  CDockWidget *CentralDockWidget = new CDockWidget("CentralWidget", nullptr);
   CentralDockWidget->setWidget(center_widget);
   center_docker_area_ = dock_manager_->setCentralWidget(CentralDockWidget);
   center_docker_area_->setAllowedAreas(DockWidgetArea::OuterDockAreas);
 
   //////////////////////////////////////////////////////////速度仪表盘
-  ads::CDockWidget *DashBoardDockWidget = new ads::CDockWidget("DashBoard");
+  ads::CDockWidget *DashBoardDockWidget = new ads::CDockWidget("DashBoard", nullptr);
   QWidget *speed_dashboard_widget = new QWidget();
   DashBoardDockWidget->setWidget(speed_dashboard_widget);
   speed_dash_board_ = new DashBoard(speed_dashboard_widget);
@@ -711,7 +711,7 @@ void MainWindow::setupUi() {
           [this](const RobotSpeed &speed) {
             PUBLISH(MSG_ID_SET_ROBOT_SPEED, speed);
           });
-  ads::CDockWidget *SpeedCtrlDockWidget = new ads::CDockWidget("SpeedCtrl");
+  ads::CDockWidget *SpeedCtrlDockWidget = new ads::CDockWidget("SpeedCtrl", nullptr);
   SpeedCtrlDockWidget->setWidget(speed_ctrl_widget_);
   auto speed_ctrl_area =
       dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea,
@@ -722,7 +722,7 @@ void MainWindow::setupUi() {
   display_config_widget_ = new DisplayConfigWidget();
   display_config_widget_->SetDisplayManager(display_manager_);
   display_config_widget_->SetChannelList(channel_manager_.DiscoveryChannelTypes());
-  settings_dock_ = new ads::CDockWidget(tr("Setting"));
+  settings_dock_ = new ads::CDockWidget(tr("Setting"), nullptr);
   settings_dock_->setWidget(display_config_widget_);
   settings_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
   settings_dock_->setMinimumSize(320, 240);
@@ -734,7 +734,7 @@ void MainWindow::setupUi() {
   ui->menuView->addAction(settings_dock_->toggleViewAction());
 
   diagnostic_dock_widget_ = new DiagnosticDockWidget();
-  diagnostic_dock_ = new ads::CDockWidget(tr("Diagnostic"));
+  diagnostic_dock_ = new ads::CDockWidget(tr("Diagnostic"), nullptr);
   diagnostic_dock_->setWidget(diagnostic_dock_widget_);
   diagnostic_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
   diagnostic_dock_->setMinimumSize(280, 200);
@@ -749,7 +749,7 @@ void MainWindow::setupUi() {
   QVBoxLayout *horizontalLayout_13 = new QVBoxLayout();
   horizontalLayout_13->addWidget(nav_goal_table_view_);
   task_list_widget->setLayout(horizontalLayout_13);
-  ads::CDockWidget *nav_goal_list_dock_widget = new ads::CDockWidget("Task");
+  ads::CDockWidget *nav_goal_list_dock_widget = new ads::CDockWidget("Task", nullptr);
   
   // 现代化按钮样式
   QString modernButtonStyle = R"(
@@ -900,7 +900,7 @@ void MainWindow::setupUi() {
   for (auto one_image : Config::ConfigManager::Instance()->GetRootConfig().images) {
     LOG_INFO("init image window location:" << one_image.location << " topic:" << one_image.topic);
     image_frame_map_[one_image.location] = new RatioLayoutedFrame(this);
-    ads::CDockWidget *dock_widget = new ads::CDockWidget(std::string("image/" + one_image.location).c_str());
+    ads::CDockWidget *dock_widget = new ads::CDockWidget(std::string("image/" + one_image.location).c_str(), nullptr);
     dock_widget->setWidget(image_frame_map_[one_image.location]);
     image_dock_map_[one_image.location] = dock_widget;
     dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea, dock_widget);

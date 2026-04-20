@@ -53,6 +53,7 @@ class DisplayManager : public QObject {
   void SetScaleSmall();
   QWidget *GetViewPtr() { return graphics_view_ptr_; }
   void FocusDisplay(const std::string &display_name);
+  RobotPose GetRobotPose() const { return robot_pose_; }
   RobotPose wordPose2Scene(const RobotPose &point);
   QPointF wordPose2Scene(const QPointF &point);
   RobotPose wordPose2Map(const RobotPose &pose);
@@ -67,14 +68,12 @@ class DisplayManager : public QObject {
   void signalTopologyMapUpdate(const TopologyMap &topology_map);
   void signalCurrentSelectPointChanged(const TopologyMap::PointInfo &point);
   void signalEditMapModeChanged(MapEditMode mode);
+  void signalCursorPose(QPointF pos);
 
  public slots:
   void slotRobotScenePoseChanged(const RobotPose &pose);
   void slotSetRobotPose(const RobotPose &pose);
   void updateScaled(double value);
-
- private slots:
-  void signalCursorPose(QPointF pos);
 
  private:
   void InitUi();
