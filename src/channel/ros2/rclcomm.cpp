@@ -81,80 +81,67 @@ bool rclcomm::Start() {
     speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
         GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
 
-    map_subscriber_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-        GET_TOPIC_NAME(DISPLAY_MAP), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-        std::bind(&rclcomm::map_callback, this, std::placeholders::_1), sub1_obt);
-    
-    local_cost_map_subscriber_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-        GET_TOPIC_NAME(DISPLAY_LOCAL_COST_MAP), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-        std::bind(&rclcomm::localCostMapCallback, this, std::placeholders::_1), sub1_obt);
+    // Helper for robust subscription
+    auto create_safe_sub = [&](const std::string& topic_key, auto& sub, auto callback, const rclcpp::QoS& qos, const rclcpp::SubscriptionOptions& obt) {
+        try {
+            using MessageT = typename std::remove_reference_t<decltype(sub)>::element_type::MessageT;
+            sub = node->create_subscription<MessageT>(
+                GET_TOPIC_NAME(topic_key), qos, std::bind(callback, this, std::placeholders::_1), obt);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to subscribe to " << topic_key << " (" << GET_TOPIC_NAME(topic_key) << "): " << e.what());
+        }
+    };
+
+    create_safe_sub(DISPLAY_MAP, map_subscriber_, &rclcomm::map_callback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_LOCAL_COST_MAP, local_cost_map_subscriber_, &rclcomm::localCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_GLOBAL_COST_MAP, global_cost_map_subscriber_, &rclcomm::globalCostMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
+    create_safe_sub(DISPLAY_LASER, laser_scan_subscriber_, &rclcomm::laser_callback, rclcpp::QoS(20), sub_laser_obt);
+    create_safe_sub(MSG_ID_BATTERY_STATE, battery_state_subscriber_, &rclcomm::BatteryCallback, rclcpp::QoS(1), sub1_obt);
+    create_safe_sub(MSG_ID_DIAGNOSTIC, diagnostic_subscriber_, &rclcomm::diagnostic_callback, rclcpp::QoS(10), sub1_obt);
+    create_safe_sub(DISPLAY_GLOBAL_PATH, global_path_subscriber_, &rclcomm::path_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_LOCAL_PATH, local_path_subscriber_, &rclcomm::local_path_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_ROBOT, odometry_subscriber_, &rclcomm::odom_callback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_ROBOT_FOOTPRINT, robot_footprint_subscriber_, &rclcomm::robotFootprintCallback, rclcpp::QoS(20), sub1_obt);
+    create_safe_sub(DISPLAY_TOPOLOGY_MAP, topology_map_subscriber_, &rclcomm::topologyMapCallback, rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(), sub1_obt);
         
-    global_cost_map_subscriber_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-        GET_TOPIC_NAME(DISPLAY_GLOBAL_COST_MAP), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-        std::bind(&rclcomm::globalCostMapCallback, this, std::placeholders::_1), sub1_obt);
-
-    laser_scan_subscriber_ = node->create_subscription<sensor_msgs::msg::LaserScan>(
-        GET_TOPIC_NAME(DISPLAY_LASER), 20,
-        std::bind(&rclcomm::laser_callback, this, std::placeholders::_1), sub_laser_obt);
-
-    battery_state_subscriber_ = node->create_subscription<sensor_msgs::msg::BatteryState>(
-        GET_TOPIC_NAME(MSG_ID_BATTERY_STATE), 1,
-        std::bind(&rclcomm::BatteryCallback, this, std::placeholders::_1), sub1_obt);
-
-    diagnostic_subscriber_ = node->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
-        GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC), 10,
-        std::bind(&rclcomm::diagnostic_callback, this, std::placeholders::_1), sub1_obt);
-
-    global_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
-        GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), 20,
-        std::bind(&rclcomm::path_callback, this, std::placeholders::_1), sub1_obt);
-
-    local_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
-        GET_TOPIC_NAME(DISPLAY_LOCAL_PATH), 20,
-        std::bind(&rclcomm::local_path_callback, this, std::placeholders::_1), sub1_obt);
-
-    odometry_subscriber_ = node->create_subscription<nav_msgs::msg::Odometry>(
-        GET_TOPIC_NAME(DISPLAY_ROBOT), 20,
-        std::bind(&rclcomm::odom_callback, this, std::placeholders::_1), sub1_obt);
-
-    robot_footprint_subscriber_ = node->create_subscription<geometry_msgs::msg::PolygonStamped>(
-        GET_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT), 20,
-        std::bind(&rclcomm::robotFootprintCallback, this, std::placeholders::_1), sub1_obt);
-        
-    topology_map_subscriber_ = node->create_subscription<topology_msgs::msg::TopologyMap>(
-        GET_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-        std::bind(&rclcomm::topologyMapCallback, this, std::placeholders::_1), sub1_obt);
-        
-    topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
-        GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+    try {
+        topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
+            GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to create publisher for topology update: " << e.what());
+    }
 
     for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
       if (one_image_display.topic.empty()) continue;
-      image_subscriber_list_.emplace_back(
-          node->create_subscription<sensor_msgs::msg::Image>(
-              one_image_display.topic, 1, [this, one_image_display](const sensor_msgs::msg::Image::SharedPtr msg) {
-                  if (!msg) return;
-                  cv::Mat conversion_mat_;
-                  try {
-                    cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
-                    if (cv_ptr) {
-                        conversion_mat_ = cv_ptr->image;
-                    }
-                  } catch (cv_bridge::Exception &e) {
+      try {
+        image_subscriber_list_.emplace_back(
+            node->create_subscription<sensor_msgs::msg::Image>(
+                one_image_display.topic, 1, [this, one_image_display](const sensor_msgs::msg::Image::SharedPtr msg) {
+                    if (!msg) return;
+                    cv::Mat conversion_mat_;
                     try {
-                      cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg);
+                      cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
                       if (cv_ptr) {
-                        if (msg->encoding == "8UC1") {
-                          cv::cvtColor(cv_ptr->image, conversion_mat_, cv::COLOR_GRAY2RGB);
-                        }
+                          conversion_mat_ = cv_ptr->image;
                       }
-                    } catch (...) { return; }
-                  }
-                  if (!conversion_mat_.empty()) {
-                      auto image_payload = std::make_pair(one_image_display.location, std::make_shared<cv::Mat>(conversion_mat_));
-                      PUBLISH(MSG_ID_IMAGE, image_payload);
-                  }
-              }));
+                    } catch (cv_bridge::Exception &e) {
+                      try {
+                        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(msg);
+                        if (cv_ptr) {
+                          if (msg->encoding == "8UC1") {
+                            cv::cvtColor(cv_ptr->image, conversion_mat_, cv::COLOR_GRAY2RGB);
+                          }
+                        }
+                      } catch (...) { return; }
+                    }
+                    if (!conversion_mat_.empty()) {
+                        auto image_payload = std::make_pair(one_image_display.location, std::make_shared<cv::Mat>(conversion_mat_));
+                        PUBLISH(MSG_ID_IMAGE, image_payload);
+                    }
+                }));
+      } catch (const std::exception& e) {
+        LOG_ERROR("Failed to subscribe to image topic " << one_image_display.topic << ": " << e.what());
+      }
     }
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node->get_clock(), std::chrono::seconds(10));
@@ -180,7 +167,9 @@ bool rclcomm::Start() {
   }));
   AddSubscription(MSG_ID_TOPOLOGY_MAP_UPDATE, SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
     topology_msgs::msg::TopologyMap ros_msg = ConvertToRosMsg(topology_map);
-    topology_map_update_publisher_->publish(ros_msg);
+    if (topology_map_update_publisher_) {
+        topology_map_update_publisher_->publish(ros_msg);
+    }
   }));
 
   init_flag_ = true;
@@ -275,11 +264,11 @@ void rclcomm::getRobotPose() {
 basic::RobotPose rclcomm::getTransform(std::string from, std::string to) {
   basic::RobotPose ret;
   try {
-    if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100))) {
+    if (!tf_buffer_ || !tf_buffer_->canTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500))) {
       return ret;
     }
     geometry_msgs::msg::TransformStamped transform =
-        tf_buffer_->lookupTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(100));
+        tf_buffer_->lookupTransform(to, from, tf2::TimePointZero, std::chrono::milliseconds(500));
     geometry_msgs::msg::Quaternion msg_quat = transform.transform.rotation;
     tf2::Quaternion q;
     tf2::fromMsg(msg_quat, q);
