@@ -63,19 +63,16 @@ class MockRobot(Node):
         grid[40:60, 40:60] = 100
         grid[120:140, 80:100] = 100
 
-        # Broadcast Static TF: map -> odom (REMOVED - Use dynamic only for better reliability in simulation)
-        # self.publish_static_tf()
+        # Broadcast Static TF: map -> odom
+        self.publish_static_tf()
 
         # Timers
-        self.create_timer(0.05, self.publish_odom_and_tf) # Increased to 20Hz
+        self.create_timer(0.1, self.publish_odom_and_tf)
         self.create_timer(0.2, self.publish_scan)
-        self.create_timer(1.0, self.publish_map) # Increased to 1Hz
+        self.create_timer(2.0, self.publish_map)
         self.create_timer(2.0, self.publish_battery)
         self.create_timer(0.1, self.publish_image)
         self.create_timer(0.02, self.update_pose) # 50Hz pose update
-
-        # Initial publications
-        self.publish_map()
 
         self.get_logger().info("Mock Robot Started. map -> odom -> base_link tree active.")
 
@@ -86,7 +83,22 @@ class MockRobot(Node):
         except Exception:
             pass
 
-    # publish_static_tf REMOVED
+    def publish_static_tf(self):
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'odom'
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        t.transform.rotation.x = 0.0
+        t.transform.rotation.y = 0.0
+        t.transform.rotation.z = 0.0
+        t.transform.rotation.w = 1.0
+        try:
+            self.static_tf_broadcaster.sendTransform(t)
+        except:
+            pass
 
     def cmd_vel_callback(self, msg):
         self.vx = msg.linear.x
